@@ -11,10 +11,17 @@ public interface Http {
     final class Response {
         public final int code;
         public final String body;
+        /** 服务端给出的错误说明（官方 API 会放在 X-Error-Message）。 */
+        public final String errorMessage;
 
         public Response(int code, String body) {
+            this(code, body, "");
+        }
+
+        public Response(int code, String body, String errorMessage) {
             this.code = code;
             this.body = body == null ? "" : body;
+            this.errorMessage = errorMessage == null ? "" : errorMessage;
         }
     }
 

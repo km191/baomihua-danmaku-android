@@ -3,6 +3,7 @@ package com.baomihua.danmaku;
 import android.content.Context;
 import android.content.SharedPreferences;
 
+import com.baomihua.danmaku.core.DanmuApi;
 import com.baomihua.danmaku.core.MiniJson;
 import com.baomihua.danmaku.core.Models;
 import com.baomihua.danmaku.core.Settings;
@@ -26,6 +27,10 @@ public final class Prefs {
     private static final String KEY_BINDINGS = "bindings_json";
     private static final String KEY_LAST_TITLE = "last_title";
     private static final String KEY_SERVICE_WANTED = "service_wanted";
+    private static final String KEY_OVERLAY_HIDDEN = "overlay_hidden";
+    private static final String KEY_BUBBLE_X = "bubble_x_ratio";
+    private static final String KEY_BUBBLE_Y = "bubble_y_ratio";
+    private static final String KEY_OPPO_GUIDE = "oppo_guide_shown";
 
     /** 一条来源绑定。 */
     public static final class Binding {
@@ -75,11 +80,13 @@ public final class Prefs {
         }
     }
 
+    private final Context context;
     private final SharedPreferences sp;
     private Settings cached;
 
     public Prefs(Context context) {
-        this.sp = context.getApplicationContext().getSharedPreferences("danmu", Context.MODE_PRIVATE);
+        this.context = context.getApplicationContext();
+        this.sp = this.context.getSharedPreferences("danmu", Context.MODE_PRIVATE);
     }
 
     public Settings settings() {
@@ -117,8 +124,59 @@ public final class Prefs {
         sp.edit().putBoolean(KEY_SERVICE_WANTED, wanted).apply();
     }
 
+    /** 悬浮窗是否被用户手动隐藏；服务仍在运行，只是不画。 */
+    public boolean isOverlayHidden() {
+        return sp.getBoolean(KEY_OVERLAY_HIDDEN, false);
+    }
+
+    public void setOverlayHidden(boolean hidden) {
+        sp.edit().putBoolean(KEY_OVERLAY_HIDDEN, hidden).apply();
+    }
+
     public void setLastTitle(String title) {
         sp.edit().putString(KEY_LAST_TITLE, title == null ? "" : title).apply();
+    }
+
+    /** 官方弹弹play v2 的 AppSecret，加密存放在独立文件里。 */
+    public String apiSecret() {
+        return SecretStore.read(context);
+    }
+
+    /** @return true 表示已加密保存；false 表示 Keystore 不可用、用了私有明文兜底 */
+    public boolean setApiSecret(String secret) {
+        return SecretStore.write(context, secret == null ? "" : secret);
+    }
+
+    /** 当前配置好的鉴权参数（Secret 为空时 active() 为 false）。 */
+    public DanmuApi.Auth apiAuth() {
+        Settings s = settings();
+        return new DanmuApi.Auth(s.apiAuthMode, s.apiAppId, apiSecret());
+    }
+
+    /** 悬浮球位置（0~1 的比例）；-1 表示还没拖过。 */
+    public float bubbleXRatio() {
+        return sp.getFloat(KEY_BUBBLE_X, -1f);
+    }
+
+    public float bubbleYRatio() {
+        return sp.getFloat(KEY_BUBBLE_Y, -1f);
+    }
+
+    public void setBubbleRatios(float x, float y) {
+        sp.edit().putFloat(KEY_BUBBLE_X, clamp01(x)).putFloat(KEY_BUBBLE_Y, clamp01(y)).apply();
+    }
+
+    /** ColorOS 首次引导只弹一次。 */
+    public boolean oppoGuideShown() {
+        return sp.getBoolean(KEY_OPPO_GUIDE, false);
+    }
+
+    public void setOppoGuideShown(boolean shown) {
+        sp.edit().putBoolean(KEY_OPPO_GUIDE, shown).apply();
+    }
+
+    private static float clamp01(float value) {
+        return Math.max(0f, Math.min(1f, value));
     }
 
     // ------------------------------------------------------------ 来源绑定

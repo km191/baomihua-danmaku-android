@@ -30,6 +30,7 @@ import com.baomihua.danmaku.core.CommentParser;
 import com.baomihua.danmaku.core.Danmaku;
 import com.baomihua.danmaku.core.DanmuApi;
 import com.baomihua.danmaku.core.Models;
+import com.baomihua.danmaku.core.OemProfile;
 import com.baomihua.danmaku.core.TitleParser;
 
 import java.io.ByteArrayOutputStream;
@@ -41,7 +42,7 @@ import java.util.List;
  */
 public final class PanelActivity extends Activity {
 
-    public static final String VERSION = "1.1.2";
+    public static final String VERSION = "1.3.5";
 
     private static final int REQ_OVERLAY = 1001;
     private static final int REQ_NOTIFICATIONS = 1002;
@@ -61,7 +62,8 @@ public final class PanelActivity extends Activity {
     private TextView startButton;
     private LinearLayout permissionCard;
     private LinearLayout permissionRows;
-    private Ui.Segment areaSegment;
+    private LinearLayout oemCard;
+    private LinearLayout oemRows;
     private Ui.Segment densitySegment;
     private String crashText = "";
     private TextView diagOverlayPerm;
@@ -72,6 +74,8 @@ public final class PanelActivity extends Activity {
     private TextView diagSession;
     private TextView diagDanmaku;
     private TextView diagEvents;
+    private TextView diagDevice;
+    private TextView diagSystem;
 
     private final Runnable refresher = new Runnable() {
         @Override
@@ -123,6 +127,7 @@ public final class PanelActivity extends Activity {
     protected void onResume() {
         super.onResume();
         renderPermissions();
+        renderOem();
         renderStatus();
         OverlayService service = OverlayService.get();
         if (service != null) {
@@ -178,6 +183,8 @@ public final class PanelActivity extends Activity {
         permissionCard = buildPermissionCard();
         root.addView(permissionCard);
         root.addView(buildDiagCard());
+        oemCard = buildOemCard();
+        root.addView(oemCard);
         root.addView(buildDisplayCard());
         root.addView(buildMoreCard());
         root.addView(buildAboutCard());
@@ -297,18 +304,101 @@ public final class PanelActivity extends Activity {
     private LinearLayout buildPermissionCard() {
         LinearLayout card = Ui.card(this);
         card.addView(Ui.sectionTitle(this, "还差几步"));
-        TextView note = Ui.text(this, "伴侣要画在被播放器占满的屏幕上，所以需要两个系统授权。", Theme.DIM, 12.5f);
+        TextView note = Ui.text(this, "伴侣要画在被播放器占满的屏幕上，还要读播放状态，所以需要几个系统授权。", Theme.DIM, 12.5f);
         card.addView(note);
         permissionRows = new LinearLayout(this);
         permissionRows.setOrientation(LinearLayout.VERTICAL);
         permissionRows.setPadding(0, Theme.dp(this, 8), 0, 0);
         card.addView(permissionRows);
+        card.addView(Ui.hint(this,
+                "Android 13+ 从浏览器安装的应用，如果「通知使用权」里找不到本应用、或开关是灰的："
+                        + "到 应用信息 → 右上角「⋮」→ 允许受限设置，再回来授权。"));
         return card;
+    }
+
+    /** OPPO / 一加 / realme 专用的后台设置入口，其他机型不显示。 */
+    private LinearLayout buildOemCard() {
+        LinearLayout card = Ui.card(this);
+        card.addView(Ui.sectionTitle(this, "ColorOS 后台设置"));
+        card.addView(Ui.text(this,
+                "ColorOS 会限制后台应用。下面几项做完，锁屏或切到别的 app 后弹幕才不容易被系统收走。",
+                Theme.DIM, 12.5f));
+        oemRows = new LinearLayout(this);
+        oemRows.setOrientation(LinearLayout.VERTICAL);
+        oemRows.setPadding(0, Theme.dp(this, 6), 0, 0);
+        card.addView(oemRows);
+        card.addView(Ui.hint(this,
+                "手动路径参考：设置 → 应用管理 → 弹幕伴侣 → 耗电管理 → 允许后台活动；"
+                        + "权限管理 → 悬浮窗 / 后台弹出界面。"));
+        card.setVisibility(App.oem().isColorOs() ? View.VISIBLE : View.GONE);
+        return card;
+    }
+
+    private void renderOem() {
+        if (oemCard == null || oemRows == null) {
+            return;
+        }
+        OemProfile oem = App.oem();
+        oemCard.setVisibility(oem.isColorOs() ? View.VISIBLE : View.GONE);
+        if (!oem.isColorOs()) {
+            return;
+        }
+        oemRows.removeAllViews();
+        final boolean batteryOk = OemSettings.isIgnoringBatteryOptimizations(this);
+        oemRows.addView(oemRow("电池优化", batteryOk ? "已放行 · 系统不会限制后台" : "未放行 · 锁屏后容易被清理",
+                batteryOk ? "已放行" : "去放行", batteryOk ? Theme.GREEN : Theme.RED,
+                new View.OnClickListener() {
+                    @Override
+                    public void onClick(View v) {
+                        OemSettings.open(PanelActivity.this,
+                                OemSettings.Hop.BATTERY_OPTIMIZATION);
+                    }
+                }));
+        oemRows.addView(oemRow("自启动", "允许弹幕伴侣在开机或后台自行启动", "去设置", Theme.DIM,
+                new View.OnClickListener() {
+                    @Override
+                    public void onClick(View v) {
+                        OemSettings.open(PanelActivity.this, OemSettings.Hop.AUTO_START);
+                    }
+                }));
+        oemRows.addView(oemRow("耗电管理", "选择「允许后台活动」，别选「智能省电」", "去设置", Theme.DIM,
+                new View.OnClickListener() {
+                    @Override
+                    public void onClick(View v) {
+                        OemSettings.open(PanelActivity.this, OemSettings.Hop.POWER_USAGE);
+                    }
+                }));
+        oemRows.addView(oemRow("后台弹出界面", "点悬浮球弹出小面板需要这个权限", "去设置", Theme.DIM,
+                new View.OnClickListener() {
+                    @Override
+                    public void onClick(View v) {
+                        OemSettings.open(PanelActivity.this, OemSettings.Hop.BACKGROUND_POPUP);
+                    }
+                }));
+    }
+
+    private View oemRow(String title, String note, String action, int noteColor,
+                        View.OnClickListener click) {
+        LinearLayout row = Ui.row(this);
+        row.setPadding(0, Theme.dp(this, 6), 0, Theme.dp(this, 6));
+        LinearLayout column = new LinearLayout(this);
+        column.setOrientation(LinearLayout.VERTICAL);
+        column.setLayoutParams(new LinearLayout.LayoutParams(0,
+                ViewGroup.LayoutParams.WRAP_CONTENT, 1f));
+        column.addView(Ui.text(this, title, Theme.TEXT, 13f));
+        column.addView(Ui.text(this, note, noteColor, 11.5f));
+        row.addView(column);
+        TextView button = Ui.button(this, action, false);
+        button.setOnClickListener(click);
+        row.addView(button);
+        return row;
     }
 
     private LinearLayout buildDiagCard() {
         LinearLayout card = Ui.card(this);
         card.addView(Ui.sectionTitle(this, "自检"));
+        diagDevice = addDiagRow(card, "机型");
+        diagSystem = addDiagRow(card, "系统");
         diagOverlayPerm = addDiagRow(card, "悬浮窗权限");
         diagListenerPerm = addDiagRow(card, "通知使用权");
         diagService = addDiagRow(card, "前台服务");
@@ -398,6 +488,14 @@ public final class PanelActivity extends Activity {
         OverlayService service = OverlayService.get();
         boolean overlay = App.canDrawOverlays(this);
         boolean listener = MediaWatcher.isEnabled(this);
+        OemProfile oem = App.oem();
+        diagDevice.setText(oem.deviceLine());
+        String colorOs = App.colorOsVersion();
+        String system = "Android " + Build.VERSION.RELEASE;
+        if (oem.isColorOs()) {
+            system = "ColorOS" + (colorOs.isEmpty() ? "" : " " + colorOs) + " · " + system;
+        }
+        diagSystem.setText(system);
         diagOverlayPerm.setText(overlay ? "已授权" : "未授权");
         diagOverlayPerm.setTextColor(overlay ? Theme.GREEN : Theme.RED);
         diagListenerPerm.setText(listener ? "已授权" : "未授权");
@@ -434,9 +532,21 @@ public final class PanelActivity extends Activity {
         StringBuilder sb = new StringBuilder();
         sb.append("包名: ").append(getPackageName()).append('\n');
         sb.append("版本: ").append(VERSION).append('\n');
+        OemProfile oem = App.oem();
+        sb.append("机型: ").append(oem.deviceLine()).append('\n');
         sb.append("系统: Android ").append(Build.VERSION.RELEASE)
-                .append(" (API ").append(Build.VERSION.SDK_INT).append(") ").append(Build.MANUFACTURER)
-                .append(' ').append(Build.MODEL).append('\n');
+                .append(" (API ").append(Build.VERSION.SDK_INT).append(')');
+        if (oem.isColorOs()) {
+            String colorOs = App.colorOsVersion();
+            sb.append(" · ColorOS").append(colorOs.isEmpty() ? "" : " " + colorOs);
+        }
+        sb.append('\n');
+        if (oem.isColorOs()) {
+            sb.append("电池优化: ")
+                    .append(OemSettings.isIgnoringBatteryOptimizations(this) ? "已放行" : "未放行")
+                    .append('\n');
+            sb.append("后台看护: RestartJobService(15min) / 闹钟恢复\n");
+        }
         sb.append("悬浮窗权限: ").append(App.canDrawOverlays(this)).append('\n');
         sb.append("通知使用权: ").append(MediaWatcher.isEnabled(this)).append('\n');
         OverlayService service = OverlayService.get();
@@ -476,30 +586,22 @@ public final class PanelActivity extends Activity {
                     }
                 }));
 
-        card.addView(Ui.gap(this, 6));
-        card.addView(Ui.text(this, "显示区域", Theme.TEXT, 13.5f));
-        String[] areaLabels = {"1/4", "1/2", "3/4", "全屏"};
-        int[] areaValues = {25, 50, 75, 100};
-        int areaIndex = 1;
-        for (int i = 0; i < areaValues.length; i++) {
-            if (areaValues[i] == prefs.settings().areaPercent) {
-                areaIndex = i;
-            }
-        }
-        final int[] areas = areaValues;
-        areaSegment = Ui.segment(this, areaLabels, areaIndex, new Ui.OnSelect() {
-            @Override
-            public void onSelect(int index) {
-                prefs.updateSetting(new Prefs.SettingEdit() {
+        card.addView(Ui.gap(this, 10));
+        addSlider(card, "弹幕行数", 1, 30, 1, " 行", prefs.settings().maxRows,
+                new Ui.OnValue() {
                     @Override
-                    public void apply(com.baomihua.danmaku.core.Settings s) {
-                        s.areaPercent = areas[index];
+                    public void onValue(final float value) {
+                        prefs.updateSetting(new Prefs.SettingEdit() {
+                            @Override
+                            public void apply(com.baomihua.danmaku.core.Settings s) {
+                                s.maxRows = Math.round(value);
+                            }
+                        });
+                        applyToService(true);
                     }
                 });
-                applyToService();
-            }
-        });
-        card.addView(areaSegment.root);
+        card.addView(Ui.hint(this,
+                "从屏幕顶部往下排，行数越多占得越高；屏幕放不下时自动取最大可用行数。"));
 
         card.addView(Ui.gap(this, 10));
         addSlider(card, "字号", 10, 48, 1, " px", prefs.settings().fontSp, new Ui.OnValue() {
@@ -582,7 +684,7 @@ public final class PanelActivity extends Activity {
         card.addView(densitySegment.root);
 
         card.addView(Ui.switchRow(this, "底部弹幕", prefs.settings().allowBottom,
-                "只在「全屏」显示区域时出现",
+                "显示在最后一行的位置",
                 new android.widget.CompoundButton.OnCheckedChangeListener() {
                     @Override
                     public void onCheckedChanged(android.widget.CompoundButton buttonView,
@@ -683,8 +785,8 @@ public final class PanelActivity extends Activity {
         apiInput.setText(prefs.settings().apiBase);
         apiInput.setInputType(InputType.TYPE_CLASS_TEXT | InputType.TYPE_TEXT_VARIATION_URI);
         card.addView(apiInput);
-        card.addView(Ui.hint(this, "需要弹弹play API v2 兼容的服务（例如自建的 danmu_api）。"
-                + "填入服务根地址即可，程序会自己拼 /api/v2。"));
+        card.addView(Ui.hint(this, "需要弹弹play API v2 兼容的服务：自建 danmu_api 填根地址即可；"
+                + "官方 api.dandanplay.net 还要在下面填 AppId / AppSecret。程序会自动补 /api/v2。"));
 
         LinearLayout apiButtons = Ui.row(this);
         apiButtons.setPadding(0, Theme.dp(this, 8), 0, 0);
@@ -714,6 +816,80 @@ public final class PanelActivity extends Activity {
         apiButtons.addView(test);
         card.addView(apiButtons);
 
+        card.addView(Ui.gap(this, 12));
+        card.addView(Ui.text(this, "官方 API 鉴权（可选）", Theme.TEXT, 13.5f));
+        card.addView(Ui.hint(this,
+                "自建 danmu_api 一般不用鉴权。用 https://api.dandanplay.net 时，"
+                        + "填弹弹play开发者中心分配的 AppId / AppSecret；推荐「签名」模式，Secret 不会随请求发送。"));
+
+        final int[] authMode = {prefs.settings().apiAuthMode};
+        Ui.Segment authSegment = Ui.segment(this, new String[]{"无鉴权", "签名", "凭证"},
+                Math.max(0, Math.min(2, authMode[0])), new Ui.OnSelect() {
+                    @Override
+                    public void onSelect(int index) {
+                        authMode[0] = index;
+                    }
+                });
+        card.addView(authSegment.root);
+
+        final EditText appIdInput = Ui.input(this, "AppId（开发者中心分配的，不是用户名）");
+        appIdInput.setText(prefs.settings().apiAppId);
+        card.addView(appIdInput);
+
+        final EditText secretInput = Ui.input(this,
+                prefs.apiSecret().isEmpty() ? "AppSecret" : "AppSecret 已保存，留空表示不修改");
+        secretInput.setInputType(InputType.TYPE_CLASS_TEXT
+                | InputType.TYPE_TEXT_VARIATION_PASSWORD);
+        card.addView(secretInput);
+
+        LinearLayout authButtons = Ui.row(this);
+        authButtons.setPadding(0, Theme.dp(this, 8), 0, 0);
+        TextView saveAuth = Ui.button(this, "保存鉴权", true);
+        saveAuth.setOnClickListener(new View.OnClickListener() {
+            @Override
+            public void onClick(View v) {
+                final int mode = authMode[0];
+                final String appId = appIdInput.getText().toString().trim();
+                prefs.updateSetting(new Prefs.SettingEdit() {
+                    @Override
+                    public void apply(com.baomihua.danmaku.core.Settings s) {
+                        s.apiAuthMode = mode;
+                        s.apiAppId = appId;
+                    }
+                });
+                String secret = secretInput.getText().toString().trim();
+                boolean encrypted = true;
+                if (!secret.isEmpty()) {
+                    encrypted = prefs.setApiSecret(secret);
+                    secretInput.setText("");
+                    secretInput.setHint("AppSecret 已保存，留空表示不修改");
+                }
+                boolean hasSecret = !secret.isEmpty() || !prefs.apiSecret().isEmpty();
+                if (mode != 0 && (appId.isEmpty() || !hasSecret)) {
+                    toast("AppId 和 AppSecret 都要填，才能用官方 API");
+                } else if (!encrypted) {
+                    toast("已保存；本机加密不可用，Secret 以应用私有明文保存");
+                } else {
+                    toast("鉴权设置已保存");
+                }
+                renderStatus();
+            }
+        });
+        authButtons.addView(saveAuth);
+        authButtons.addView(Ui.gap(this, 8));
+        TextView clearSecret = Ui.button(this, "清除密钥", false);
+        clearSecret.setOnClickListener(new View.OnClickListener() {
+            @Override
+            public void onClick(View v) {
+                prefs.setApiSecret("");
+                secretInput.setText("");
+                secretInput.setHint("AppSecret");
+                toast("AppSecret 已清除");
+            }
+        });
+        authButtons.addView(clearSecret);
+        card.addView(authButtons);
+
         card.addView(Ui.switchRow(this, "悬浮球", prefs.settings().bubble,
                 "屏幕边缘的小圆点，点一下打开面板",
                 new android.widget.CompoundButton.OnCheckedChangeListener() {
@@ -729,6 +905,22 @@ public final class PanelActivity extends Activity {
                         applyToService();
                     }
                 }));
+
+        card.addView(Ui.gap(this, 4));
+        TextView resetBubble = Ui.button(this, "悬浮球复位到右边", false);
+        resetBubble.setOnClickListener(new View.OnClickListener() {
+            @Override
+            public void onClick(View v) {
+                OverlayService service = OverlayService.get();
+                if (service != null) {
+                    service.resetBubbleToRight();
+                } else {
+                    prefs.setBubbleRatios(1f, 0.5f);
+                }
+                toast("悬浮球已复位到右边");
+            }
+        });
+        card.addView(resetBubble);
 
         card.addView(Ui.switchRow(this, "开机自启", prefs.settings().autoStart,
                 "重启手机后自动驻留",
@@ -756,6 +948,23 @@ public final class PanelActivity extends Activity {
             }
         });
         card.addView(clear);
+
+        card.addView(Ui.gap(this, 8));
+        TextView stopService = Ui.button(this, "停止服务（移除通知）", false);
+        stopService.setOnClickListener(new View.OnClickListener() {
+            @Override
+            public void onClick(View v) {
+                OverlayService.stop(PanelActivity.this);
+                toast("已请求停止服务");
+                handler.postDelayed(new Runnable() {
+                    @Override
+                    public void run() {
+                        renderStatus();
+                    }
+                }, 300);
+            }
+        });
+        card.addView(stopService);
         return card;
     }
 
@@ -768,7 +977,9 @@ public final class PanelActivity extends Activity {
                         + "3. 伴侣会读取播放器的标题，提炼出关键片名去搜索，自动拉取弹幕；识别不准时用「手动搜索 / 换源」。\n"
                         + "4. 屏幕边上的「弹」字圆点是悬浮球：点一下弹出小面板（调字号/速度、搜片、校准都行），"
                         + "长按打开这个完整设置页，拖动可以换位置。\n"
-                        + "5. 弹幕时间不对时，用小面板里的「校准」把当前画面时间告诉伴侣。",
+                        + "5. 想暂时收起弹幕：点主面板的「隐藏悬浮窗」，或下拉通知栏点一下通知；"
+                        + "服务继续在后台，随时能再显示。\n"
+                        + "6. 弹幕时间不对时，用小面板里的「校准」把当前画面时间告诉伴侣。",
                 Theme.DIM, 12.5f));
         card.addView(Ui.hint(this, "本应用不提供影视资源，只负责把弹幕画在屏幕上。"
                 + "搜索与弹幕请求会发往你自己填写的服务地址。"));
@@ -791,7 +1002,9 @@ public final class PanelActivity extends Activity {
         boolean notifications = Build.VERSION.SDK_INT < Build.VERSION_CODES.TIRAMISU
                 || checkSelfPermission(Manifest.permission.POST_NOTIFICATIONS)
                 == PackageManager.PERMISSION_GRANTED;
-        boolean missing = !overlay || !listener || !notifications;
+        boolean colorOs = App.oem().isColorOs();
+        boolean batteryOk = !colorOs || OemSettings.isIgnoringBatteryOptimizations(this);
+        boolean missing = !overlay || !listener || !notifications || !batteryOk;
         permissionCard.setVisibility(missing ? View.VISIBLE : View.GONE);
         permissionRows.removeAllViews();
         if (!overlay) {
@@ -821,6 +1034,19 @@ public final class PanelActivity extends Activity {
                         }
                     }));
         }
+        if (!batteryOk) {
+            permissionRows.addView(permissionRow("后台运行（ColorOS）",
+                    "放行电池优化，锁屏后不容易被系统清理", "去放行",
+                    new View.OnClickListener() {
+                        @Override
+                        public void onClick(View v) {
+                            OemSettings.open(PanelActivity.this,
+                                    OemSettings.Hop.BATTERY_OPTIMIZATION);
+                            renderOem();
+                        }
+                    }));
+        }
+        renderOem();
     }
 
     private View permissionRow(String title, String note, String action, View.OnClickListener click) {
@@ -897,13 +1123,18 @@ public final class PanelActivity extends Activity {
 
     private void toggleService() {
         if (OverlayService.isRunning()) {
-            OverlayService.stop(this);
+            OverlayService service = OverlayService.get();
+            if (service != null) {
+                boolean wasHidden = service.isHidden();
+                service.toggleHidden();
+                toast(wasHidden ? "已恢复显示，收起面板后可见" : "已隐藏悬浮窗，点通知栏可恢复");
+            }
             handler.postDelayed(new Runnable() {
                 @Override
                 public void run() {
                     renderStatus();
                 }
-            }, 300);
+            }, 180);
             return;
         }
         if (!App.canDrawOverlays(this)) {
@@ -912,7 +1143,8 @@ public final class PanelActivity extends Activity {
             return;
         }
         try {
-            OverlayService.start(this);
+            // 从面板主动开启时强制显示；开机/闹钟恢复才沿用上次的隐藏状态
+            OverlayService.start(this, true);
             toast("已开启，去播放器里看吧");
         } catch (Exception e) {
             toast("启动失败：" + e.getMessage());
@@ -925,9 +1157,46 @@ public final class PanelActivity extends Activity {
                 if (service != null) {
                     service.setPanelVisible(true);
                 }
+                renderPermissions();
                 renderStatus();
+                maybeShowColorOsGuide();
             }
         }, 500);
+    }
+
+    /**
+     * ColorOS 首次开启悬浮窗时提醒两句：电池优化和自启动没放行的话，
+     * 用户看到「弹幕过一会儿就没了」比看到弹窗更困惑。
+     */
+    private void maybeShowColorOsGuide() {
+        if (isFinishing() || isDestroyed()) {
+            return;
+        }
+        OemProfile oem = App.oem();
+        if (!oem.isColorOs() || prefs.oppoGuideShown()) {
+            return;
+        }
+        prefs.setOppoGuideShown(true);
+        if (OemSettings.isIgnoringBatteryOptimizations(this)) {
+            return;
+        }
+        new AlertDialog.Builder(this)
+                .setTitle("ColorOS 还要放行两步")
+                .setMessage("弹幕已经打开。ColorOS 会在锁屏或切到后台后清理应用，"
+                        + "建议现在放行，否则看一会儿弹幕可能消失。\n\n"
+                        + "1. 电池优化 → 允许后台活动\n"
+                        + "2. 应用权限 → 自启动 / 后台弹出界面\n\n"
+                        + "下面「ColorOS 后台设置」卡片里有直达按钮。")
+                .setPositiveButton("去放行", new DialogInterface.OnClickListener() {
+                    @Override
+                    public void onClick(DialogInterface dialog, int which) {
+                        OemSettings.open(PanelActivity.this,
+                                OemSettings.Hop.BATTERY_OPTIMIZATION);
+                        renderOem();
+                    }
+                })
+                .setNegativeButton("稍后", null)
+                .show();
     }
 
     private void applyToService() {
@@ -956,6 +1225,10 @@ public final class PanelActivity extends Activity {
 
     private void renderStatus() {
         Status status = Status.get();
+        boolean running = OverlayService.isRunning();
+        OverlayService service = OverlayService.get();
+        boolean hidden = running && service != null && service.isHidden();
+
         int color;
         switch (status.state) {
             case Status.READY:
@@ -971,12 +1244,17 @@ public final class PanelActivity extends Activity {
                 color = Theme.DIM;
                 break;
         }
-        statusPill.setText(status.serviceRunning ? status.stateLabel() : "未启动");
+        if (hidden) {
+            color = Theme.BLUE;
+        }
+        statusPill.setText(!running ? "未启动" : hidden ? "已隐藏" : status.stateLabel());
         statusPill.setTextColor(color);
         statusPill.setBackground(Theme.pill(this, withAlpha(color, 0x22)));
 
-        headline.setText(status.headline);
-        detail.setText(status.detail);
+        headline.setText(hidden ? "悬浮窗已隐藏" : status.headline);
+        detail.setText(hidden
+                ? "服务仍在后台运行。点通知栏，或点下面的「显示悬浮窗」恢复。"
+                : status.detail);
 
         String media = status.mediaTitle;
         if (media == null || media.isEmpty()) {
@@ -1004,10 +1282,12 @@ public final class PanelActivity extends Activity {
         }
         positionLine.setText(position.toString());
 
-        boolean running = OverlayService.isRunning();
-        startButton.setText(running ? "停止悬浮窗" : "开启悬浮窗");
-        startButton.setBackground(running ? Theme.pill(this, 0xFF242B38) : Theme.pill(this, Theme.ACCENT));
-        startButton.setTextColor(running ? Theme.TEXT : 0xFF16110D);
+        startButton.setText(!running ? "开启悬浮窗"
+                : hidden ? "显示悬浮窗" : "隐藏悬浮窗");
+        startButton.setBackground(!running
+                ? Theme.pill(this, Theme.ACCENT)
+                : Theme.pill(this, 0xFF242B38));
+        startButton.setTextColor(!running ? 0xFF16110D : Theme.TEXT);
         renderDiag();
     }
 
@@ -1229,13 +1509,19 @@ public final class PanelActivity extends Activity {
             toast("先填地址");
             return;
         }
+        final DanmuApi.Auth auth = prefs.apiAuth();
+        if (auth.incomplete()) {
+            toast("先填 AppId / AppSecret，并点「保存鉴权」");
+            return;
+        }
         toast("正在连接…");
         new Thread(new Runnable() {
             @Override
             public void run() {
                 String message;
                 try {
-                    DanmuApi api = new DanmuApi(base, new com.baomihua.danmaku.core.UrlHttp());
+                    DanmuApi api = new DanmuApi(base,
+                            new com.baomihua.danmaku.core.UrlHttp(), auth);
                     List<Models.Anime> result = api.searchEpisodes("测试");
                     message = "连接成功，返回 " + result.size() + " 个结果";
                 } catch (DanmuApi.ApiException e) {

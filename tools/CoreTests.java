@@ -1,4 +1,5 @@
 import com.baomihua.danmaku.core.AutoMatcher;
+import com.baomihua.danmaku.core.Base64Codec;
 import com.baomihua.danmaku.core.CommentParser;
 import com.baomihua.danmaku.core.Danmaku;
 import com.baomihua.danmaku.core.DanmakuEngine;
@@ -6,7 +7,9 @@ import com.baomihua.danmaku.core.DanmuApi;
 import com.baomihua.danmaku.core.Http;
 import com.baomihua.danmaku.core.MatchScorer;
 import com.baomihua.danmaku.core.MiniJson;
+import com.baomihua.danmaku.core.OemProfile;
 import com.baomihua.danmaku.core.PlaybackGate;
+import com.baomihua.danmaku.core.RegionMath;
 import com.baomihua.danmaku.core.Models;
 import com.baomihua.danmaku.core.Settings;
 import com.baomihua.danmaku.core.TitleParser;
@@ -39,7 +42,10 @@ public final class CoreTests {
         engineLayout();
         engineSeek();
         engineMergingAndOffset();
+        engineRows();
         apiClient();
+        oemProfile();
+        regionMath();
 
         System.out.println();
         System.out.println("==========================================");
@@ -386,6 +392,23 @@ public final class CoreTests {
         eq("屏蔽词数量", 4, words.blockedWords().length);
         eq("屏蔽词首项", "剧透", words.blockedWords()[0]);
         eq("屏蔽词去空格", "前方", words.blockedWords()[1]);
+
+        Settings auth = Settings.defaults();
+        auth.apiBase = "https://api.dandanplay.net";
+        auth.apiAuthMode = 1;
+        auth.apiAppId = "  appid-1  ";
+        Settings authBack = Settings.fromJson(auth.toJson());
+        eq("设置: 鉴权模式", 1, authBack.apiAuthMode);
+        eq("设置: AppId 去空格", "appid-1", authBack.apiAppId);
+        auth.apiAuthMode = 9;
+        eq("设置: 鉴权模式钳制", 2, Settings.fromJson(auth.toJson()).apiAuthMode);
+
+        Settings rows = Settings.defaults();
+        eq("设置: 默认行数", 12, rows.maxRows);
+        rows.maxRows = 99;
+        eq("设置: 行数上限", 30, Settings.fromJson(rows.toJson()).maxRows);
+        rows.maxRows = 0;
+        eq("设置: 行数下限", 1, Settings.fromJson(rows.toJson()).maxRows);
     }
 
     // ------------------------------------------------------------ 引擎：排版
@@ -546,7 +569,35 @@ public final class CoreTests {
         eq("偏移: 3 秒时出现", 1, shifted.size());
     }
 
-    // ------------------------------------------------------------ API 客户端
+    // ------------------------------------------------------------ 弹幕行数
+
+    private static void engineRows() {
+        DanmakuEngine engine = new DanmakuEngine(new FakeMeasurer());
+        DanmakuEngine.Config cfg = engine.config();
+        cfg.fontPx = 40f;
+        cfg.scaleWithViewport = false;
+        cfg.maxRows = 5;
+        engine.setViewport(1000, 1000);
+        engine.applyConfig(cfg);
+        eq("行数: 指定 5 行", 5, engine.laneCount());
+
+        List<Danmaku> list = new ArrayList<>();
+        list.add(new Danmaku(0, "顶部第一行", Danmaku.MODE_SCROLL, 0xFFFFFF));
+        engine.load(list);
+        engine.frame(0);
+        engine.frame(16);
+        check("行数: 第一条已上屏", engine.size() > 0, String.valueOf(engine.size()));
+        if (engine.size() > 0) {
+            eq("行数: 第一行从最顶部开始", 40f, engine.spriteAt(0).baselineY);
+        }
+
+        cfg.maxRows = 50;
+        engine.applyConfig(cfg);
+        engine.setViewport(1000, 300);
+        engine.applyConfig(cfg);
+        check("行数: 放不下时取最大可用行数", engine.laneCount() <= 5,
+                String.valueOf(engine.laneCount()));
+    }
 
     private static void apiClient() {
         eq("端点: 裸域名", "https://danmu.example.com/api/v2",
@@ -557,13 +608,23 @@ public final class CoreTests {
                 DanmuApi.endpointOf("https://danmu.example.com/api/v2/"));
         eq("端点: 路径 Token", "https://danmu.example.com/abc/api/v2",
                 DanmuApi.endpointOf("https://danmu.example.com/abc"));
+        eq("端点: 查询 Token", "https://danmu.example.com/api/v2?token=abc",
+                DanmuApi.endpointOf("https://danmu.example.com?token=abc"));
+        eq("端点: api/v2 + 查询 Token", "https://danmu.example.com/api/v2?token=abc",
+                DanmuApi.endpointOf("https://danmu.example.com/api/v2?token=abc"));
 
         final Map<String, String> responses = new HashMap<>();
         final List<String> requested = new ArrayList<>();
+        final Map<String, String> lastHeaders = new HashMap<>();
+        final List<String> requestBodies = new ArrayList<>();
         Http fake = new Http() {
             @Override
             public Response get(String url, Map<String, String> headers, int timeoutMs) {
                 requested.add(url);
+                lastHeaders.clear();
+                if (headers != null) {
+                    lastHeaders.putAll(headers);
+                }
                 if (url.contains("/comment/")) {
                     return new Response(200, responses.get("comment"));
                 }
@@ -580,6 +641,11 @@ public final class CoreTests {
             @Override
             public Response post(String url, String jsonBody, Map<String, String> headers, int timeoutMs) {
                 requested.add("POST " + url);
+                lastHeaders.clear();
+                if (headers != null) {
+                    lastHeaders.putAll(headers);
+                }
+                requestBodies.add(jsonBody);
                 return new Response(200, "{\"isMatched\":true,\"matches\":[{\"episodeId\":88,"
                         + "\"animeId\":9,\"animeTitle\":\"某番\",\"episodeTitle\":\"第5话\"}]}");
             }
@@ -609,6 +675,10 @@ public final class CoreTests {
             List<Models.Episode> matched = api.match("某番 - 第5集.mp4", 1400000);
             eq("API: 匹配结果", 1, matched.size());
             eq("API: 匹配集 ID", 88L, matched.get(0).episodeId);
+            String matchBody = requestBodies.get(requestBodies.size() - 1);
+            check("API: match 用 fileNameOnly",
+                    matchBody.contains("\"matchMode\":\"fileNameOnly\""), matchBody);
+            check("API: match 不伪造 hash", !matchBody.contains("fileHash"), matchBody);
 
             List<Models.Episode> eps = api.episodesOf(9);
             eq("API: bangumi 分集", 1, eps.size());
@@ -633,6 +703,168 @@ public final class CoreTests {
         } catch (DanmuApi.ApiException e) {
             check("API: 空地址提示", e.getMessage().contains("地址"), e.getMessage());
         }
+
+        // Base64 / 官方签名
+        eq("Base64: 空", "", Base64Codec.encode(new byte[0]));
+        eq("Base64: f", "Zg==", Base64Codec.encode("f".getBytes(java.nio.charset.StandardCharsets.UTF_8)));
+        eq("Base64: fo", "Zm8=", Base64Codec.encode("fo".getBytes(java.nio.charset.StandardCharsets.UTF_8)));
+        eq("Base64: foo", "Zm9v", Base64Codec.encode("foo".getBytes(java.nio.charset.StandardCharsets.UTF_8)));
+        eq("Base64: 二进制", "AAEC", Base64Codec.encode(new byte[]{0, 1, 2}));
+        eq("官方签名向量", "oykjtAeMjRLO9sAerNa9hMyQZqFdBcWneI/ED4BerSQ=",
+                DanmuApi.signature("app123", 1735660800L, "/api/v2/comment/123450001",
+                        "secret456"));
+
+        // 签名模式请求头
+        responses.put("searchCode", "200");
+        DanmuApi signed = new DanmuApi("https://host", fake,
+                new DanmuApi.Auth(DanmuApi.Auth.MODE_SIGNATURE, "id-1", "secret-1"));
+        try {
+            signed.searchEpisodes("测试");
+            eq("鉴权: X-AppId", "id-1", lastHeaders.get("X-AppId"));
+            String timestamp = lastHeaders.get("X-Timestamp");
+            check("鉴权: 有时间戳", timestamp != null && !timestamp.isEmpty(),
+                    String.valueOf(timestamp));
+            long ts = timestamp == null ? 0L : Long.parseLong(timestamp);
+            eq("鉴权: 签名与算法一致",
+                    DanmuApi.signature("id-1", ts, "/api/v2/search/episodes", "secret-1"),
+                    lastHeaders.get("X-Signature"));
+        } catch (DanmuApi.ApiException e) {
+            check("鉴权: 签名请求不抛异常", false, e.getMessage());
+        }
+
+        // 凭证模式
+        DanmuApi credential = new DanmuApi("https://host", fake,
+                new DanmuApi.Auth(DanmuApi.Auth.MODE_CREDENTIAL, "id-2", "secret-2"));
+        try {
+            credential.searchEpisodes("测试");
+            eq("凭证: X-AppSecret", "secret-2", lastHeaders.get("X-AppSecret"));
+        } catch (DanmuApi.ApiException e) {
+            check("凭证: 请求不抛异常", false, e.getMessage());
+        }
+
+        // 无鉴权不发认证头
+        try {
+            new DanmuApi("https://host", fake).searchEpisodes("测试");
+            eq("无鉴权: 没有 X-AppId", null, lastHeaders.get("X-AppId"));
+            eq("无鉴权: 没有 X-AppSecret", null, lastHeaders.get("X-AppSecret"));
+        } catch (DanmuApi.ApiException e) {
+            check("无鉴权: 请求不抛异常", false, e.getMessage());
+        }
+
+        // 403 错误头翻译
+        Http forbidden = new Http() {
+            @Override
+            public Response get(String url, Map<String, String> headers, int timeoutMs) {
+                return new Response(403, "", "Invalid Signature");
+            }
+
+            @Override
+            public Response post(String url, String jsonBody,
+                                 Map<String, String> headers, int timeoutMs) {
+                return new Response(403, "", "Invalid Signature");
+            }
+        };
+        try {
+            new DanmuApi("https://host", forbidden,
+                    new DanmuApi.Auth(DanmuApi.Auth.MODE_SIGNATURE, "id", "secret"))
+                    .searchEpisodes("x");
+            check("403: 应抛异常", false, "");
+        } catch (DanmuApi.ApiException e) {
+            eq("403: 状态码", 403, e.httpCode);
+            check("403: 翻译签名错误", e.getMessage().contains("签名"), e.getMessage());
+        }
+
+        // data 包装的搜索结果
+        Http wrapped = new Http() {
+            @Override
+            public Response get(String url, Map<String, String> headers, int timeoutMs) {
+                return new Response(200, "{\"success\":true,\"data\":{\"animes\":["
+                        + "{\"animeId\":7,\"animeTitle\":\"包装番\",\"episodes\":["
+                        + "{\"episodeId\":70,\"episodeTitle\":\"第1话\"}]}]}}");
+            }
+
+            @Override
+            public Response post(String url, String jsonBody,
+                                 Map<String, String> headers, int timeoutMs) {
+                return new Response(200, "{}");
+            }
+        };
+        try {
+            List<Models.Anime> wrappedResult = new DanmuApi("https://host", wrapped)
+                    .searchEpisodes("包装番");
+            eq("兼容: data.animes 包装", 1, wrappedResult.size());
+            eq("兼容: 包装结果标题", "包装番", wrappedResult.get(0).title);
+        } catch (DanmuApi.ApiException e) {
+            check("兼容: 包装响应不抛异常", false, e.getMessage());
+        }
+    }
+
+    // ------------------------------------------------------------ 厂商与安全区
+
+    private static void oemProfile() {
+        OemProfile oppo = OemProfile.of("OPPO", "OPPO", "PJD110");
+        check("OPPO 识别为 ColorOS", oppo.isColorOs(), oppo.label());
+        eq("OPPO 标签", "OPPO ColorOS", oppo.label());
+        eq("OPPO 机型行", "OPPO PJD110", oppo.deviceLine());
+
+        OemProfile oneplus = OemProfile.of("OnePlus", "OnePlus", "PJD110");
+        check("一加按 ColorOS 处理", oneplus.isColorOs(), oneplus.label());
+        eq("一加标签", "一加 ColorOS", oneplus.label());
+
+        OemProfile realme = OemProfile.of("realme", "realme", "RMX3708");
+        check("realme 按 ColorOS 处理", realme.isColorOs(), realme.label());
+        eq("realme 标签", "realme UI", realme.label());
+
+        check("OPLUS 识别", OemProfile.of("OPLUS", "oplus", "PJE110").isColorOs(), "");
+
+        OemProfile xiaomi = OemProfile.of("Xiaomi", "Xiaomi", "2201123C");
+        check("小米不显示 ColorOS 卡片", !xiaomi.isColorOs(), xiaomi.label());
+        eq("小米标签首字母大写", "Xiaomi", xiaomi.label());
+
+        OemProfile unknown = OemProfile.of(null, null, null);
+        check("空厂商不崩", !unknown.isColorOs(), unknown.label());
+        eq("空厂商标签", "Android", unknown.label());
+        eq("未知机型行", "Android", unknown.deviceLine());
+
+        eq("ColorOS 版本", "14.0.1", OemProfile.extractColorOsVersion("ColorOS 14.0.1"));
+        eq("ColorOS 版本（V 前缀）", "13.1.0",
+                OemProfile.extractColorOsVersion("PJD110_11", "ColorOS V13.1.0"));
+        eq("ColorOS 版本（大写）", "12", OemProfile.extractColorOsVersion("COLOROS 12"));
+        eq("OPLUSROM 版本", "13.0", OemProfile.extractColorOsVersion("OPLUSROM 13.0"));
+        eq("ColorOS 版本缺省", "", OemProfile.extractColorOsVersion("PJD110_11.A.45", null));
+    }
+
+    private static void regionMath() {
+        int[] full = RegionMath.region(2412, 108, 0, 0, 100, 40);
+        eq("OPPO 全屏: top 避开挖孔", 108, full[0]);
+        eq("OPPO 全屏: 高度等于安全区", 2304, full[1]);
+
+        int[] half = RegionMath.region(2412, 108, 0, 50, 100, 40);
+        eq("OPPO 下半屏: top", 1260, half[0]);
+        eq("OPPO 下半屏: 高度", 1152, half[1]);
+
+        int[] upper = RegionMath.region(2412, 108, 0, 0, 50, 40);
+        eq("OPPO 上半屏: top", 108, upper[0]);
+        eq("OPPO 上半屏: 高度", 1152, upper[1]);
+
+        int[] noInsets = RegionMath.region(1920, 0, 0, 25, 75, 40);
+        eq("无安全区 25%: top", 480, noInsets[0]);
+        eq("无安全区 25%: 高度", 960, noInsets[1]);
+
+        int[] clampedTop = RegionMath.region(1000, 400, 0, 0, 100, 40);
+        eq("顶部安全区最多吃 1/4", 250, clampedTop[0]);
+        eq("顶部安全区夹紧后高度", 750, clampedTop[1]);
+
+        int[] minHeight = RegionMath.region(200, 0, 0, 0, 5, 40);
+        eq("最小高度兜底", 40, minHeight[1]);
+
+        int[] tiny = RegionMath.region(100, 50, 50, 0, 100, 40);
+        eq("小屏安全区: top", 25, tiny[0]);
+        eq("小屏安全区: 高度", 50, tiny[1]);
+
+        int[] degenerate = RegionMath.region(0, 0, 0, 0, 100, 40);
+        eq("屏幕高度 0 不崩: top", 0, degenerate[0]);
+        check("屏幕高度 0 不崩: 高度 > 0", degenerate[1] > 0, String.valueOf(degenerate[1]));
     }
 
     // ------------------------------------------------------------ 断言工具

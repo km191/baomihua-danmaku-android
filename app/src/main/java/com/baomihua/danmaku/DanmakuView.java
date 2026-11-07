@@ -40,6 +40,7 @@ public final class DanmakuView extends View implements Choreographer.FrameCallba
     private boolean frameScheduled;
     private long lastDrawnPosition = -1L;
     private long appliedOffsetMs = Long.MIN_VALUE;
+    private float appliedShadowRadius = -1f;
     private long testBannerUntil;
     private String toastText;
     private long toastUntil;
@@ -83,18 +84,22 @@ public final class DanmakuView extends View implements Choreographer.FrameCallba
     public void applySettings(Settings s, int screenHeight) {
         this.settings = s;
         this.screenHeightPx = Math.max(1, screenHeight);
+        // ColorOS 的「字体大小 / 显示大小」可能在服务运行期间变化，这里重新读一次。
+        density = getResources().getDisplayMetrics().density;
+        scaledDensity = getResources().getDisplayMetrics().scaledDensity;
         DanmakuEngine.Config cfg = engine.config();
         cfg.fontPx = Math.max(10f, s.fontSp * scaledDensity);
         cfg.referenceHeightPx = screenHeightPx;
         cfg.scaleWithViewport = s.scaleWithViewport;
         cfg.areaRatio = s.areaRatio();
+        cfg.maxRows = s.maxRows;
         cfg.speed = s.speed;
         cfg.density = s.density;
         cfg.mergeDuplicates = s.mergeDuplicates;
         cfg.timeOffsetMs = s.timeOffsetMs;
         cfg.allowTop = true;
-        // 底部弹幕只在“全屏显示区域”时出现，和桌面版规则一致
-        cfg.allowBottom = s.allowBottom && s.areaPercent >= 100;
+        // 行数模式下，底部弹幕显示在最后一行，由开关直接控制
+        cfg.allowBottom = s.allowBottom;
         engine.applyConfig(cfg);
         // 时间偏移变了要重新对齐时间轴，否则已上屏的弹幕位置会错乱
         if (appliedOffsetMs != cfg.timeOffsetMs) {
@@ -254,25 +259,41 @@ public final class DanmakuView extends View implements Choreographer.FrameCallba
         float shadowRadius = 0f;
         if (settings.shadow > 0f) {
             shadowRadius = 0.22f * settings.fontSp * scaledDensity * settings.shadow;
-            textPaint.setShadowLayer(shadowRadius, shadowRadius * 0.35f, shadowRadius * 0.45f,
-                    ((int) (0x99 * settings.shadow) << 24) | 0x000000);
-        } else {
-            textPaint.clearShadowLayer();
+        }
+        // setShadowLayer 会刷新 Paint 的原生缓存，只在参数变化时调用。
+        if (shadowRadius != appliedShadowRadius) {
+            appliedShadowRadius = shadowRadius;
+            if (shadowRadius > 0f) {
+                textPaint.setShadowLayer(shadowRadius, shadowRadius * 0.35f,
+                        shadowRadius * 0.45f,
+                        ((int) (0x99 * settings.shadow) << 24) | 0x000000);
+            } else {
+                textPaint.clearShadowLayer();
+            }
         }
 
         float strokeWidth = settings.strokeDp * density;
+        boolean drawStroke = strokeWidth > 0.4f;
+        if (drawStroke) {
+            strokePaint.setStrokeWidth(strokeWidth);
+            strokePaint.setColor(0xE6000000);
+        }
+        float lastTextPx = -1f;
         int count = engine.size();
         for (int i = 0; i < count; i++) {
             DanmakuEngine.Sprite sprite = engine.spriteAt(i);
             if (sprite.text == null || sprite.text.isEmpty()) {
                 continue;
             }
-            textPaint.setTextSize(sprite.textPx);
+            if (sprite.textPx != lastTextPx) {
+                lastTextPx = sprite.textPx;
+                textPaint.setTextSize(sprite.textPx);
+                if (drawStroke) {
+                    strokePaint.setTextSize(sprite.textPx);
+                }
+            }
             textPaint.setColor(0xFF000000 | (sprite.color & 0xFFFFFF));
-            if (strokeWidth > 0.4f) {
-                strokePaint.setTextSize(sprite.textPx);
-                strokePaint.setStrokeWidth(strokeWidth);
-                strokePaint.setColor(0xE6000000);
+            if (drawStroke) {
                 canvas.drawText(sprite.text, sprite.x, sprite.baselineY, strokePaint);
             }
             canvas.drawText(sprite.text, sprite.x, sprite.baselineY, textPaint);

@@ -18,10 +18,13 @@ import android.util.TypedValue;
 import android.view.Gravity;
 import android.view.MotionEvent;
 import android.view.View;
+import android.view.WindowInsets;
 import android.view.WindowManager;
+import android.view.WindowMetrics;
 import android.widget.TextView;
 
 import com.baomihua.danmaku.core.Danmaku;
+import com.baomihua.danmaku.core.RegionMath;
 import com.baomihua.danmaku.core.Settings;
 import com.baomihua.danmaku.core.TitleParser;
 
@@ -40,6 +43,11 @@ public final class OverlayService extends Service {
     public static final String ACTION_START = "com.baomihua.danmaku.action.START";
     public static final String ACTION_STOP = "com.baomihua.danmaku.action.STOP";
     public static final String ACTION_TOGGLE = "com.baomihua.danmaku.action.TOGGLE";
+    /** 只隐藏/显示悬浮窗，不停止服务。 */
+    public static final String ACTION_TOGGLE_HIDDEN =
+            "com.baomihua.danmaku.action.TOGGLE_HIDDEN";
+
+    private static final String EXTRA_SHOW = "extra_show";
 
     private static final String CHANNEL_ID = "overlay_status";
     private static final int NOTIFICATION_ID = 0x1D0D;
@@ -55,8 +63,19 @@ public final class OverlayService extends Service {
     }
 
     public static void start(Context context) {
+        start(context, false);
+    }
+
+    /**
+     * @param show true 表示这次启动后强制显示；false 表示沿用上次的隐藏状态
+     *             （开机、闹钟、看护任务都走这个分支）。
+     */
+    public static void start(Context context, boolean show) {
         Intent intent = new Intent(context, OverlayService.class);
         intent.setAction(ACTION_START);
+        if (show) {
+            intent.putExtra(EXTRA_SHOW, true);
+        }
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
             context.startForegroundService(intent);
         } else {
@@ -93,6 +112,11 @@ public final class OverlayService extends Service {
 
     private int screenWidth = 1080;
     private int screenHeight = 1920;
+    /** 顶部挖孔/状态栏、底部手势条、横屏侧边安全区。 */
+    private int safeLeft;
+    private int safeRight;
+    private int safeTop;
+    private int safeBottom;
 
     private String currentTitle = "";
     private String pendingTitle = "";
@@ -104,9 +128,15 @@ public final class OverlayService extends Service {
     private long lastSessionAt;
     private boolean sawSession;
     private boolean danmakuVisible = true;
+    /** 用户主动隐藏整个悬浮窗：服务还在跑，只是不画弹幕、不显示悬浮球。 */
+    private boolean userHidden;
+    /** 这次进程里成功挂上过悬浮窗；用来避免挂载失败时反复自我恢复。 */
+    private boolean everAttached;
     private long pausedSince;
     private long resolveGeneration;
     private String lastNotificationText = "";
+    /** 已经 startForeground 过；重复的显示/隐藏指令不必再把通知打回「正在启动」。 */
+    private boolean foregroundStarted;
 
     @Override
     public void onCreate() {
@@ -114,6 +144,7 @@ public final class OverlayService extends Service {
         instance = this;
         prefs = App.prefs(this);
         settings = prefs.settings();
+        userHidden = prefs.isOverlayHidden();
         windowManager = (WindowManager) getSystemService(WINDOW_SERVICE);
         readScreenSize();
         repository = new DanmuRepository(this);
@@ -126,17 +157,21 @@ public final class OverlayService extends Service {
         String action = intent == null ? ACTION_START : intent.getAction();
         if (ACTION_STOP.equals(action)) {
             Diag.add("收到停止指令");
+            prefs.setServiceWanted(false);
+            RestartReceiver.cancel(this);
+            RestartJobService.cancel(this);
             stopSelf();
             return START_NOT_STICKY;
         }
         // Android 14 起前台服务必须带类型。先按 specialUse 起，失败再退回默认类型，
         // 两条都失败才放弃——而且要把原因露出来。
-        boolean foreground = false;
-        if (Build.VERSION.SDK_INT >= 34) {
+        boolean foreground = foregroundStarted;
+        if (!foreground && Build.VERSION.SDK_INT >= 34) {
             try {
                 startForeground(NOTIFICATION_ID, buildNotification("正在启动…"),
                         android.content.pm.ServiceInfo.FOREGROUND_SERVICE_TYPE_SPECIAL_USE);
                 foreground = true;
+                foregroundStarted = true;
                 Diag.add("前台服务已就绪(specialUse) startId=" + startId);
             } catch (Throwable e) {
                 Diag.error("startForeground(specialUse) 失败", e);
@@ -146,6 +181,7 @@ public final class OverlayService extends Service {
             try {
                 startForeground(NOTIFICATION_ID, buildNotification("正在启动…"));
                 foreground = true;
+                foregroundStarted = true;
                 Diag.add("前台服务已就绪(默认类型) startId=" + startId);
             } catch (Throwable e) {
                 Diag.error("startForeground 失败", e);
@@ -153,6 +189,19 @@ public final class OverlayService extends Service {
                 stopSelf();
                 return START_NOT_STICKY;
             }
+        }
+
+        if (intent != null && intent.getBooleanExtra(EXTRA_SHOW, false)) {
+            userHidden = false;
+            prefs.setOverlayHidden(false);
+        }
+        if (ACTION_TOGGLE_HIDDEN.equals(action)) {
+            if (danmakuView == null && !attachOverlay()) {
+                stopSelf();
+                return START_NOT_STICKY;
+            }
+            toggleHidden();
+            return START_STICKY;
         }
 
         boolean allowed = App.canDrawOverlays(this);
@@ -197,13 +246,60 @@ public final class OverlayService extends Service {
             screenWidth = getResources().getDisplayMetrics().widthPixels;
             screenHeight = getResources().getDisplayMetrics().heightPixels;
         }
+        readSafeInsets();
+    }
+
+    /**
+     * OPPO 的挖孔在屏幕顶部，手势条在底部，横屏时导航栏还可能在侧边。
+     * 顶部只避让挖孔本身、不再吃状态栏高度，这样全屏播放时弹幕真正从最顶部开始；
+     * 底部和侧边仍避开导航栏/手势条。
+     */
+    private void readSafeInsets() {
+        safeLeft = 0;
+        safeRight = 0;
+        safeTop = 0;
+        safeBottom = 0;
+        if (Build.VERSION.SDK_INT >= 30) {
+            try {
+                WindowMetrics metrics = windowManager.getCurrentWindowMetrics();
+                WindowInsets insets = metrics.getWindowInsets();
+                // 用 API 20 的 systemWindowInset*，避免在低版本上引用 Insets 类。
+                safeLeft = insets.getSystemWindowInsetLeft();
+                safeRight = insets.getSystemWindowInsetRight();
+                safeBottom = insets.getSystemWindowInsetBottom();
+                if (Build.VERSION.SDK_INT >= 28) {
+                    android.view.DisplayCutout cutout = insets.getDisplayCutout();
+                    if (cutout != null) {
+                        safeLeft = Math.max(safeLeft, cutout.getSafeInsetLeft());
+                        safeRight = Math.max(safeRight, cutout.getSafeInsetRight());
+                        safeTop = Math.max(safeTop, cutout.getSafeInsetTop());
+                        safeBottom = Math.max(safeBottom, cutout.getSafeInsetBottom());
+                    }
+                }
+            } catch (Throwable ignored) {
+            }
+        }
+        if (safeTop == 0 && safeBottom == 0 && safeLeft == 0 && safeRight == 0) {
+            // 顶部不再退回状态栏高度；底部仍避开导航栏
+            safeBottom = systemDimen("navigation_bar_height");
+        }
+    }
+
+    private int systemDimen(String name) {
+        try {
+            int id = getResources().getIdentifier(name, "dimen", "android");
+            return id > 0 ? getResources().getDimensionPixelSize(id) : 0;
+        } catch (Throwable e) {
+            return 0;
+        }
     }
 
     private boolean attachOverlay() {
         readScreenSize();
         settings = prefs.settings();
-        Diag.add("屏幕 " + screenWidth + "x" + screenHeight + "，区域 " + settings.regionTopPercent
-                + "%~" + settings.regionBottomPercent + "%");
+        Diag.add("屏幕 " + screenWidth + "x" + screenHeight + "，安全区 左" + safeLeft + " 上"
+                + safeTop + " 右" + safeRight + " 下" + safeBottom + "，区域 "
+                + settings.regionTopPercent + "%~" + settings.regionBottomPercent + "%");
         if (danmakuView == null) {
             danmakuView = new DanmakuView(this);
             danmakuView.setTracker(tracker);
@@ -223,8 +319,13 @@ public final class OverlayService extends Service {
         updateDanmakuVisibility();
         updateWindowGeometry();
         updateBubble();
+        everAttached = true;
 
         tracker.start(tickRunnable);
+        // 真正挂上了才记「用户想开着」，否则下次启动 App 会白恢复一遍。
+        prefs.setServiceWanted(true);
+        RestartJobService.ensureScheduled(this);
+        RestartReceiver.cancel(this);
         Status status = Status.get();
         status.serviceRunning = true;
         status.mediaTitle = "";
@@ -236,15 +337,16 @@ public final class OverlayService extends Service {
     }
 
     private WindowManager.LayoutParams buildDanmakuParams() {
+        int[] region = region();
         WindowManager.LayoutParams params = new WindowManager.LayoutParams(
-                WindowManager.LayoutParams.MATCH_PARENT,
-                computeRegionHeight(),
+                windowWidth(),
+                region[1],
                 overlayType(),
                 overlayFlags(),
                 PixelFormat.TRANSLUCENT);
         params.gravity = Gravity.TOP | Gravity.START;
-        params.x = 0;
-        params.y = computeRegionTop();
+        params.x = safeLeft;
+        params.y = region[0];
         return params;
     }
 
@@ -274,26 +376,29 @@ public final class OverlayService extends Service {
         return WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE
                 | WindowManager.LayoutParams.FLAG_NOT_TOUCHABLE
                 | WindowManager.LayoutParams.FLAG_LAYOUT_NO_LIMITS
-                | WindowManager.LayoutParams.FLAG_LAYOUT_IN_SCREEN;
+                | WindowManager.LayoutParams.FLAG_LAYOUT_IN_SCREEN
+                | WindowManager.LayoutParams.FLAG_HARDWARE_ACCELERATED;
     }
 
-    private int computeRegionHeight() {
-        float top = settings.regionTopPercent / 100f;
-        float bottom = settings.regionBottomPercent / 100f;
-        int height = (int) (screenHeight * Math.max(0.05f, bottom - top));
-        return Math.max(Theme.dp(this, 40), height);
+    private int windowWidth() {
+        return Math.max(1, screenWidth - safeLeft - safeRight);
     }
 
-    private int computeRegionTop() {
-        return (int) (screenHeight * (settings.regionTopPercent / 100f));
+    /** 显示区域：[top, height]。百分比按「安全区」算，避开 OPPO 的挖孔和手势条。 */
+    private int[] region() {
+        return RegionMath.region(screenHeight, safeTop, safeBottom,
+                settings.regionTopPercent, settings.regionBottomPercent, Theme.dp(this, 40));
     }
 
     private void updateWindowGeometry() {
         if (danmakuView == null || danmakuParams == null) {
             return;
         }
-        danmakuParams.height = computeRegionHeight();
-        danmakuParams.y = computeRegionTop();
+        int[] region = region();
+        danmakuParams.width = windowWidth();
+        danmakuParams.height = region[1];
+        danmakuParams.x = safeLeft;
+        danmakuParams.y = region[0];
         try {
             windowManager.updateViewLayout(danmakuView, danmakuParams);
         } catch (Exception ignored) {
@@ -304,10 +409,73 @@ public final class OverlayService extends Service {
         updateBubbleVisibility();
     }
 
+    /** 悬浮球直径，屏幕旋转时会重算。 */
+    private int bubbleSize = 0;
+
+    /** ColorOS 的手势导航从屏幕边缘识别，悬浮球要离边远一点，否则一拖就触发返回。 */
+    private int edgeInset() {
+        return Theme.dp(this, App.oem().isColorOs() ? 14 : 6);
+    }
+
+    private int bubbleMinX() {
+        return safeLeft + edgeInset();
+    }
+
+    /** 靠右但不贴死屏幕边缘，避免被圆角/曲面屏裁掉；ColorOS 手势区也留出余量。 */
+    private int bubbleRightX() {
+        int size = bubbleSize > 0 ? bubbleSize : Theme.dp(this, 44);
+        return Math.max(bubbleMinX(),
+                screenWidth - safeRight - size - edgeInset());
+    }
+
+    private int bubbleMaxX() {
+        return bubbleRightX();
+    }
+
+    private int bubbleMinY() {
+        return safeTop + Theme.dp(this, 8);
+    }
+
+    private int bubbleMaxY() {
+        return Math.max(bubbleMinY(), screenHeight - safeBottom - bubbleSize - Theme.dp(this, 8));
+    }
+
+    /** 优先恢复上次拖到的位置；没拖过就停在最右侧中间。 */
+    private int[] bubbleSpot() {
+        float rx = prefs.bubbleXRatio();
+        float ry = prefs.bubbleYRatio();
+        if (rx < 0f || ry < 0f) {
+            return new int[]{bubbleRightX(), (bubbleMinY() + bubbleMaxY()) / 2};
+        }
+        return new int[]{
+                bubbleMinX() + Math.round((bubbleMaxX() - bubbleMinX()) * clamp01(rx)),
+                bubbleMinY() + Math.round((bubbleMaxY() - bubbleMinY()) * clamp01(ry))
+        };
+    }
+
+    private void saveBubbleRatio() {
+        if (bubbleParams == null) {
+            return;
+        }
+        int spanX = Math.max(1, bubbleMaxX() - bubbleMinX());
+        int spanY = Math.max(1, bubbleMaxY() - bubbleMinY());
+        prefs.setBubbleRatios((bubbleParams.x - bubbleMinX()) / (float) spanX,
+                (bubbleParams.y - bubbleMinY()) / (float) spanY);
+    }
+
+    private static float clamp01(float value) {
+        return Math.max(0f, Math.min(1f, value));
+    }
+
+    private static int clamp(int value, int min, int max) {
+        return Math.max(min, Math.min(max, value));
+    }
+
     private void addBubble() {
         if (bubbleView != null) {
             return;
         }
+        bubbleSize = Theme.dp(this, 44);
         final TextView bubble = new TextView(this);
         bubble.setText("弹");
         bubble.setTextColor(0xFF16110D);
@@ -319,15 +487,16 @@ public final class OverlayService extends Service {
         bubble.setElevation(Theme.dpF(this, 6));
 
         bubbleParams = new WindowManager.LayoutParams(
-                Theme.dp(this, 44),
-                Theme.dp(this, 44),
+                bubbleSize,
+                bubbleSize,
                 overlayType(),
                 WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE
                         | WindowManager.LayoutParams.FLAG_LAYOUT_NO_LIMITS,
                 PixelFormat.TRANSLUCENT);
         bubbleParams.gravity = Gravity.TOP | Gravity.START;
-        bubbleParams.x = screenWidth - Theme.dp(this, 56);
-        bubbleParams.y = screenHeight / 2;
+        int[] spot = bubbleSpot();
+        bubbleParams.x = spot[0];
+        bubbleParams.y = spot[1];
 
         bubble.setOnTouchListener(new View.OnTouchListener() {
             private int startX;
@@ -365,9 +534,9 @@ public final class OverlayService extends Service {
                             handler.removeCallbacks(longPress);
                         }
                         if (dragging) {
-                            bubbleParams.x = (int) Math.max(0, Math.min(screenWidth - Theme.dp(get(), 44),
+                            bubbleParams.x = (int) Math.max(bubbleMinX(), Math.min(bubbleMaxX(),
                                     startX + dx));
-                            bubbleParams.y = (int) Math.max(0, Math.min(screenHeight - Theme.dp(get(), 44),
+                            bubbleParams.y = (int) Math.max(bubbleMinY(), Math.min(bubbleMaxY(),
                                     startY + dy));
                             try {
                                 windowManager.updateViewLayout(bubble, bubbleParams);
@@ -384,6 +553,8 @@ public final class OverlayService extends Service {
                         if (!dragging && !longPressed) {
                             // 单击：就地弹出一个小面板，不离开当前播放画面
                             toggleFloatingPanel();
+                        } else if (dragging) {
+                            saveBubbleRatio();
                         }
                         return true;
                     default:
@@ -439,8 +610,10 @@ public final class OverlayService extends Service {
         floatingPanel = new FloatingPanel(this, panelHost, settings);
         floatingPanelView = floatingPanel.root();
 
-        int width = Math.min(screenWidth - Theme.dp(this, 28), Theme.dp(this, 384));
-        int height = (int) (screenHeight * 0.68f);
+        int width = Math.min(windowWidth() - Theme.dp(this, 28), Theme.dp(this, 384));
+        int maxHeight = Math.max(Theme.dp(this, 320),
+                screenHeight - safeTop - safeBottom - Theme.dp(this, 16));
+        int height = Math.min((int) (screenHeight * 0.68f), maxHeight);
         WindowManager.LayoutParams params = new WindowManager.LayoutParams(
                 Math.max(Theme.dp(this, 260), width),
                 Math.max(Theme.dp(this, 320), height),
@@ -451,7 +624,7 @@ public final class OverlayService extends Service {
                         | WindowManager.LayoutParams.FLAG_WATCH_OUTSIDE_TOUCH,
                 PixelFormat.TRANSLUCENT);
         params.gravity = Gravity.TOP | Gravity.CENTER_HORIZONTAL;
-        params.y = (int) (screenHeight * 0.07f);
+        params.y = safeTop + (int) ((screenHeight - safeTop - safeBottom) * 0.07f);
         params.softInputMode = WindowManager.LayoutParams.SOFT_INPUT_ADJUST_RESIZE;
         floatingPanelParams = params;
         try {
@@ -521,9 +694,9 @@ public final class OverlayService extends Service {
         }
 
         @Override
-        public void onStop() {
+        public void onHide() {
             hideFloatingPanel();
-            stopSelf();
+            setHidden(true);
         }
 
         @Override
@@ -567,9 +740,9 @@ public final class OverlayService extends Service {
         }
     }
 
-    /** 悬浮球该出现就出现——播放时始终可用，只有打开自家全屏面板时才让位。 */
+    /** 悬浮球该出现就出现——播放时始终可用，只有打开自家面板或用户隐藏时才让位。 */
     private void updateBubbleVisibility() {
-        boolean want = settings.bubble && !activityVisible;
+        boolean want = settings.bubble && !activityVisible && !userHidden;
         boolean attached = bubbleView != null && bubbleView.getParent() != null;
         if (want && !attached) {
             if (bubbleView != null) {
@@ -598,12 +771,12 @@ public final class OverlayService extends Service {
         return danmakuView != null && danmakuView.loadedCount() > 0;
     }
 
-    /** 弹幕是否该露出来：自己面板在前台、或者播放已结束，都收起。 */
+    /** 弹幕是否该露出来：自己面板在前台、用户手动隐藏、或者播放已结束，都收起。 */
     private void updateDanmakuVisibility() {
         if (danmakuView == null) {
             return;
         }
-        boolean show = danmakuVisible && !activityVisible;
+        boolean show = danmakuVisible && !activityVisible && !userHidden;
         danmakuView.setVisibility(show ? View.VISIBLE : View.GONE);
     }
 
@@ -639,7 +812,8 @@ public final class OverlayService extends Service {
             danmakuParams = buildDanmakuParams();
             addWindow(danmakuView, danmakuParams, "弹幕窗");
             danmakuView.applySettings(settings, screenHeight);
-            danmakuView.setVisibility(activityVisible ? View.GONE : View.VISIBLE);
+            updateWindowGeometry();
+            updateDanmakuVisibility();
         }
         if (floatingPanelView != null && floatingPanelView.getParent() == null) {
             Diag.add("小面板掉线，关闭");
@@ -825,6 +999,49 @@ public final class OverlayService extends Service {
 
     // ------------------------------------------------------------ 面板调用
 
+    /** 用户是否手动隐藏了整个悬浮窗（服务仍在运行）。 */
+    public boolean isHidden() {
+        return userHidden;
+    }
+
+    public void toggleHidden() {
+        setHidden(!userHidden);
+    }
+
+    /** 把悬浮球复位到屏幕最右端（仍可继续拖动）。 */
+    public void resetBubbleToRight() {
+        prefs.setBubbleRatios(1f, 0.5f);
+        if (bubbleView != null) {
+            removeBubble();
+        }
+        updateBubbleVisibility();
+        Diag.add("悬浮球已复位到右边");
+    }
+
+    /**
+     * 只隐藏/显示弹幕和悬浮球，不停止前台服务。
+     * 隐藏状态会记住，开机或服务被系统拉回来后仍保持。
+     */
+    public void setHidden(boolean hidden) {
+        if (userHidden == hidden) {
+            updateNotification();
+            return;
+        }
+        userHidden = hidden;
+        prefs.setOverlayHidden(hidden);
+        if (hidden) {
+            hideFloatingPanel();
+        }
+        updateDanmakuVisibility();
+        updateBubbleVisibility();
+        updateNotification();
+        Diag.add(hidden ? "用户隐藏悬浮窗（服务继续运行）" : "用户显示悬浮窗");
+        if (!hidden && danmakuView != null) {
+            danmakuView.showToast("悬浮窗已显示", 2200);
+        }
+        Status.get().publish();
+    }
+
     /** 自家全屏面板在前台时，弹幕和悬浮球先让开；离开后自动回来。 */
     public void setPanelVisible(boolean visible) {
         activityVisible = visible;
@@ -872,7 +1089,7 @@ public final class OverlayService extends Service {
     }
 
     public String screenInfo() {
-        return screenWidth + "×" + screenHeight;
+        return screenWidth + "×" + screenHeight + " · 安全区 " + safeTop + "/" + safeBottom;
     }
 
     /** 面板里「重新挂载」：把弹幕窗拆掉重来，用于窗口被系统收走的情况。 */
@@ -1016,24 +1233,36 @@ public final class OverlayService extends Service {
         return PendingIntent.getService(this, action.hashCode(), intent, flags);
     }
 
+    private PendingIntent panelIntent() {
+        Intent intent = new Intent(this, PanelActivity.class)
+                .addFlags(Intent.FLAG_ACTIVITY_SINGLE_TOP);
+        int flags = PendingIntent.FLAG_UPDATE_CURRENT;
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
+            flags |= PendingIntent.FLAG_IMMUTABLE;
+        }
+        return PendingIntent.getActivity(this, 1, intent, flags);
+    }
+
     private Notification buildNotification(String text) {
         Notification.Builder builder = Build.VERSION.SDK_INT >= Build.VERSION_CODES.O
                 ? new Notification.Builder(this, CHANNEL_ID)
                 : new Notification.Builder(this);
         builder.setSmallIcon(R.drawable.ic_stat_danmaku)
-                .setContentTitle(getString(R.string.notification_title))
+                .setContentTitle(getString(userHidden
+                        ? R.string.notification_title_hidden
+                        : R.string.notification_title))
                 .setContentText(text)
                 .setOngoing(true)
                 .setShowWhen(false)
-                .setContentIntent(PendingIntent.getActivity(this, 0,
-                        new Intent(this, PanelActivity.class)
-                                .addFlags(Intent.FLAG_ACTIVITY_SINGLE_TOP),
-                        Build.VERSION.SDK_INT >= Build.VERSION_CODES.M
-                                ? PendingIntent.FLAG_UPDATE_CURRENT | PendingIntent.FLAG_IMMUTABLE
-                                : PendingIntent.FLAG_UPDATE_CURRENT))
+                // 点通知本体 = 显示/隐藏，不打断当前播放
+                .setContentIntent(serviceIntent(ACTION_TOGGLE_HIDDEN))
                 .addAction(new Notification.Action.Builder(
-                        notifyIcon(), getString(R.string.action_toggle),
-                        serviceIntent(ACTION_TOGGLE)).build())
+                        notifyIcon(),
+                        getString(userHidden ? R.string.action_show : R.string.action_hide),
+                        serviceIntent(ACTION_TOGGLE_HIDDEN)).build())
+                .addAction(new Notification.Action.Builder(
+                        notifyIcon(), getString(R.string.action_settings),
+                        panelIntent()).build())
                 .addAction(new Notification.Action.Builder(
                         notifyIcon(), getString(R.string.action_stop),
                         serviceIntent(ACTION_STOP)).build());
@@ -1051,7 +1280,9 @@ public final class OverlayService extends Service {
         }
         Status status = Status.get();
         String text;
-        if (status.state == Status.READY) {
+        if (userHidden) {
+            text = getString(R.string.notification_text_hidden);
+        } else if (status.state == Status.READY) {
             text = status.headline + (loadedLabel.isEmpty() ? "" : " · " + loadedLabel);
         } else {
             text = status.headline;
@@ -1072,15 +1303,38 @@ public final class OverlayService extends Service {
     public void onConfigurationChanged(android.content.res.Configuration newConfig) {
         super.onConfigurationChanged(newConfig);
         readScreenSize();
+        hideFloatingPanel();
         if (danmakuView != null) {
             danmakuView.applySettings(settings, screenHeight);
         }
         updateWindowGeometry();
+        // 横竖屏切换后屏幕宽度变了：重挂一次悬浮球，按比例/默认位置重新贴边，
+        // 否则竖屏时创建的 x 坐标到了横屏会停在屏幕中间。
+        if (bubbleView != null) {
+            removeBubble();
+        }
+        updateBubbleVisibility();
+    }
+
+    /** ColorOS 从最近任务划掉时不会走 onDestroy；这里留一个短闹钟把自己拉回来。 */
+    @Override
+    public void onTaskRemoved(Intent rootIntent) {
+        Diag.add("最近任务被划掉");
+        if (prefs != null && prefs.isServiceWanted()) {
+            RestartReceiver.schedule(this, 2000L);
+        }
+        super.onTaskRemoved(rootIntent);
     }
 
     @Override
     public void onDestroy() {
         super.onDestroy();
+        // 用户主动关掉时 wanted=false，不会安排恢复；被系统清掉才需要。
+        if (everAttached && prefs != null && prefs.isServiceWanted()
+                && App.canDrawOverlays(this)) {
+            Diag.add("服务被销毁，安排自动恢复");
+            RestartReceiver.schedule(this, 3000L);
+        }
         if (tracker != null) {
             tracker.stop();
         }
@@ -1098,6 +1352,7 @@ public final class OverlayService extends Service {
         }
         handler.removeCallbacksAndMessages(null);
         instance = null;
+        foregroundStarted = false;
         Status status = Status.get();
         status.serviceRunning = false;
         status.count = 0;

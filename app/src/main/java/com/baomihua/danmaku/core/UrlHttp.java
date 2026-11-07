@@ -61,7 +61,8 @@ public final class UrlHttp implements Http {
                 in = conn.getInputStream();
             }
             String content = readAll(in, conn.getContentEncoding());
-            return new Response(code, content);
+            String errorMessage = conn.getHeaderField("X-Error-Message");
+            return new Response(code, content, errorMessage);
         } finally {
             if (conn != null) {
                 conn.disconnect();

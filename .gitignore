@@ -1,6 +1,7 @@
 # 构建产物
 build/
 dist/*.apk
+dist/SHA256SUMS.txt
 !dist/.gitkeep
 
 # 本地签名密钥（自己用；发布请换成正式密钥）

@@ -42,7 +42,7 @@ final class FloatingPanel {
 
         void onRematch();
 
-        void onStop();
+        void onHide();
 
         void onOpenFullPanel();
 
@@ -216,14 +216,14 @@ final class FloatingPanel {
         });
         footer.addView(full);
         footer.addView(Ui.gap(context, 6));
-        TextView stop = Ui.button(context, "停止悬浮窗", false);
-        stop.setOnClickListener(new View.OnClickListener() {
+        TextView hide = Ui.button(context, "隐藏悬浮窗", false);
+        hide.setOnClickListener(new View.OnClickListener() {
             @Override
             public void onClick(View v) {
-                FloatingPanel.this.host.onStop();
+                FloatingPanel.this.host.onHide();
             }
         });
-        footer.addView(stop);
+        footer.addView(hide);
         root.addView(footer);
 
         showSettings();
@@ -251,23 +251,13 @@ final class FloatingPanel {
         LinearLayout box = new LinearLayout(context);
         box.setOrientation(LinearLayout.VERTICAL);
 
-        box.addView(Ui.text(context, "显示区域", Theme.TEXT, 12.5f));
-        String[] areaLabels = {"1/4", "1/2", "3/4", "全屏"};
-        final int[] areaValues = {25, 50, 75, 100};
-        int areaIndex = 1;
-        for (int i = 0; i < areaValues.length; i++) {
-            if (areaValues[i] == settings.areaPercent) {
-                areaIndex = i;
-            }
-        }
-        Ui.Segment area = Ui.segment(context, areaLabels, areaIndex, new Ui.OnSelect() {
+        addSlider(box, "弹幕行数", 1, 30, 1, " 行", settings.maxRows, new Ui.OnValue() {
             @Override
-            public void onSelect(int index) {
-                settings.areaPercent = areaValues[index];
+            public void onValue(float value) {
+                settings.maxRows = Math.round(value);
                 host.onSettingsChanged(settings);
             }
         });
-        box.addView(area.root);
 
         box.addView(Ui.gap(context, 6));
         addSlider(box, "字号", 10, 48, 1, " px", settings.fontSp, new Ui.OnValue() {
@@ -335,7 +325,7 @@ final class FloatingPanel {
                         host.onSettingsChanged(settings);
                     }
                 }));
-        box.addView(Ui.switchRow(context, "底部弹幕", settings.allowBottom, "仅全屏区域",
+        box.addView(Ui.switchRow(context, "底部弹幕", settings.allowBottom, "显示在最下面一行",
                 new android.widget.CompoundButton.OnCheckedChangeListener() {
                     @Override
                     public void onCheckedChanged(android.widget.CompoundButton buttonView,

@@ -10,8 +10,10 @@ public final class Settings {
 
     /** 总开关。 */
     public boolean enabled = true;
-    /** 显示区域：从顶部向下 25/50/75/100 %。 */
+    /** 显示区域：从顶部向下 25/50/75/100 %（旧配置用；maxRows>0 时忽略）。 */
     public int areaPercent = 50;
+    /** 弹幕行数：从屏幕顶部往下排几行；默认 12 行。 */
+    public int maxRows = 12;
     /** 字号，单位 sp。 */
     public int fontSp = 22;
     /** 速度倍率。 */
@@ -34,6 +36,10 @@ public final class Settings {
     public int timeOffsetMs = 0;
     /** 弹幕服务地址（弹弹play v2 兼容）。 */
     public String apiBase = "";
+    /** 官方 v2 鉴权：0 无 / 1 签名 / 2 凭证。 */
+    public int apiAuthMode = 0;
+    /** 官方 v2 的 AppId；AppSecret 不在这里，单独加密存储。 */
+    public String apiAppId = "";
     /** 显示悬浮球。 */
     public boolean bubble = true;
     /** 开机自启。 */
@@ -53,9 +59,10 @@ public final class Settings {
 
     public String toJson() {
         Map<String, Object> m = new LinkedHashMap<>();
-        m.put("version", 2);
+        m.put("version", 3);
         m.put("enabled", enabled);
         m.put("areaPercent", areaPercent);
+        m.put("maxRows", maxRows);
         m.put("fontSp", fontSp);
         m.put("speed", speed);
         m.put("opacity", opacity);
@@ -67,6 +74,8 @@ public final class Settings {
         m.put("mergeDuplicates", mergeDuplicates);
         m.put("timeOffsetMs", timeOffsetMs);
         m.put("apiBase", apiBase);
+        m.put("apiAuthMode", apiAuthMode);
+        m.put("apiAppId", apiAppId);
         m.put("bubble", bubble);
         m.put("autoStart", autoStart);
         m.put("showStatusToast", showStatusToast);
@@ -87,6 +96,7 @@ public final class Settings {
         }
         s.enabled = MiniJson.bool(m, "enabled", s.enabled);
         s.areaPercent = clampInt((int) MiniJson.lng(m, "areaPercent", s.areaPercent), 25, 100);
+        s.maxRows = clampInt((int) MiniJson.lng(m, "maxRows", s.maxRows), 1, 30);
         s.fontSp = clampInt((int) MiniJson.lng(m, "fontSp", s.fontSp), 10, 48);
         s.speed = clampFloat((float) asDouble(m.get("speed"), s.speed), 0.3f, 3f);
         s.opacity = clampFloat((float) asDouble(m.get("opacity"), s.opacity), 0.15f, 1f);
@@ -104,6 +114,11 @@ public final class Settings {
         if (api != null) {
             s.apiBase = api.trim();
         }
+        s.apiAuthMode = clampInt((int) MiniJson.lng(m, "apiAuthMode", s.apiAuthMode), 0, 2);
+        String appId = MiniJson.str(m, "apiAppId");
+        if (appId != null) {
+            s.apiAppId = appId.trim();
+        }
         s.bubble = MiniJson.bool(m, "bubble", s.bubble);
         s.autoStart = MiniJson.bool(m, "autoStart", s.autoStart);
         s.showStatusToast = MiniJson.bool(m, "showStatusToast", s.showStatusToast);
@@ -120,7 +135,7 @@ public final class Settings {
         return fromJson(toJson());
     }
 
-    /** 显示区域百分比 → 引擎比例。 */
+    /** 显示区域百分比 → 引擎比例（maxRows>0 时引擎不再使用）。 */
     public float areaRatio() {
         return areaPercent / 100f;
     }

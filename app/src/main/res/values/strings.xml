@@ -4,8 +4,13 @@
     <string name="media_watcher_label">弹幕伴侣 · 媒体识别</string>
     <string name="channel_service">弹幕悬浮窗</string>
     <string name="notification_title">弹幕伴侣正在运行</string>
+    <string name="notification_title_hidden">弹幕伴侣 · 已隐藏</string>
     <string name="notification_text">弹幕会叠加在当前播放的app上</string>
-    <string name="action_stop">停止</string>
+    <string name="notification_text_hidden">已隐藏 · 点按通知栏显示</string>
+    <string name="action_stop">停止服务</string>
     <string name="action_open">打开面板</string>
+    <string name="action_settings">设置</string>
     <string name="action_toggle">显示/隐藏弹幕</string>
+    <string name="action_hide">隐藏悬浮窗</string>
+    <string name="action_show">显示悬浮窗</string>
 </resources>

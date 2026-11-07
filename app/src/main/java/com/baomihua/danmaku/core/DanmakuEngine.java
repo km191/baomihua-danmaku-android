@@ -32,6 +32,8 @@ public final class DanmakuEngine {
         public float fontPx = 44f;
         public float speed = 1f;
         public float areaRatio = 0.5f;
+        /** 从顶部往下排几行；0 表示按 areaRatio 自动。 */
+        public int maxRows = 12;
         public int density = DENSITY_NORMAL;
         public boolean scaleWithViewport = true;
         public long timeOffsetMs = 0L;
@@ -48,6 +50,7 @@ public final class DanmakuEngine {
             c.fontPx = fontPx;
             c.speed = speed;
             c.areaRatio = areaRatio;
+            c.maxRows = maxRows;
             c.density = density;
             c.scaleWithViewport = scaleWithViewport;
             c.timeOffsetMs = timeOffsetMs;
@@ -140,6 +143,7 @@ public final class DanmakuEngine {
         cfg.fontPx = next.fontPx;
         cfg.speed = next.speed;
         cfg.areaRatio = next.areaRatio;
+        cfg.maxRows = next.maxRows;
         cfg.density = next.density;
         cfg.scaleWithViewport = next.scaleWithViewport;
         cfg.timeOffsetMs = next.timeOffsetMs;
@@ -182,8 +186,16 @@ public final class DanmakuEngine {
         }
         fontPx = Math.max(10f, Math.min(fontPx, height * 0.16f));
         laneHeight = fontPx * 1.32f;
-        int areaHeight = Math.max(1, (int) (height * clamp(cfg.areaRatio, 0.15f, 1f)));
-        laneCount = Math.max(1, (int) (areaHeight / laneHeight));
+        int fitRows = Math.max(1, (int) (height / laneHeight));
+        int areaRows;
+        if (cfg.maxRows > 0) {
+            // 行数模式：固定从顶部往下排 N 行，屏幕放不下就取能放下的最大行数。
+            areaRows = Math.min(cfg.maxRows, fitRows);
+        } else {
+            int areaHeight = Math.max(1, (int) (height * clamp(cfg.areaRatio, 0.15f, 1f)));
+            areaRows = Math.max(1, (int) (areaHeight / laneHeight));
+        }
+        laneCount = Math.max(1, Math.min(areaRows, fitRows));
         float durationSec = 9.0f / Math.max(0.3f, Math.min(cfg.speed, 3.0f));
         pxPerMs = width / (durationSec * 1000f);
         gapPx = fontPx * 0.65f;
@@ -268,7 +280,8 @@ public final class DanmakuEngine {
 
     /**
      * 每帧推进。{@code videoMs} 是播放器的当前播放位置；
-     * 时间倒退或跳跃超过 900ms 视为跳转，自动重新同步。
+     * 时间倒退超过 1.5 秒或前进超过 1.8 秒才视为跳转/卡顿，重新同步。
+     * 阈值放宽是为了让采样抖动、暂停/恢复的一次对齐或偶发掉帧不至于把整屏弹幕清掉。
      */
     public void frame(long videoMs) {
         if (dirtyLanes) {
@@ -279,7 +292,10 @@ public final class DanmakuEngine {
             return;
         }
         long delta = videoMs - lastVideoMs;
-        if (delta < -150L || delta > 900L) {
+        if (delta == 0L && !active.isEmpty()) {
+            return;
+        }
+        if (delta < -1500L || delta > 1800L) {
             syncTo(videoMs);
             return;
         }
@@ -339,7 +355,7 @@ public final class DanmakuEngine {
             } else {
                 s.x = width - (width + a.width) * p;
             }
-            s.baselineY = a.lane * laneHeight + fontPx;
+            s.baselineY = Math.min(a.lane, laneCount - 1) * laneHeight + fontPx;
         }
         while (sprites.size() > active.size()) {
             sprites.remove(sprites.size() - 1);
@@ -440,6 +456,11 @@ public final class DanmakuEngine {
 
     public int size() {
         return Math.min(sprites.size(), active.size());
+    }
+
+    /** 当前可用轨道数（= 弹幕行数）。 */
+    public int laneCount() {
+        return laneCount;
     }
     public Sprite spriteAt(int index) {
         return sprites.get(index);

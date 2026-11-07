@@ -2,12 +2,16 @@ package com.baomihua.danmaku;
 
 import android.app.Application;
 import android.content.Context;
+import android.os.Build;
 import android.os.Handler;
 import android.os.Looper;
+
+import com.baomihua.danmaku.core.OemProfile;
 
 public final class App extends Application {
 
     private static App instance;
+    private static OemProfile oem;
     private Prefs prefs;
     private final Handler main = new Handler(Looper.getMainLooper());
 
@@ -112,5 +116,19 @@ public final class App extends Application {
         } catch (Exception e) {
             return false;
         }
+    }
+
+    /** 当前机型；只在第一次调用时读 Build 字段。 */
+    public static OemProfile oem() {
+        if (oem == null) {
+            oem = OemProfile.of(Build.MANUFACTURER, Build.BRAND, Build.MODEL);
+        }
+        return oem;
+    }
+
+    /** 能读到的 ColorOS 版本号，读不到就是空串。 */
+    public static String colorOsVersion() {
+        return OemProfile.extractColorOsVersion(Build.VERSION.INCREMENTAL, Build.DISPLAY,
+                Build.VERSION.RELEASE);
     }
 }

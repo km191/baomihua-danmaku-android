@@ -79,7 +79,11 @@ public final class DanmuRepository {
         if (settings.apiBase == null || settings.apiBase.trim().isEmpty()) {
             throw new DanmuApi.ApiException(0, "还没有填写弹幕服务地址");
         }
-        return new DanmuApi(settings.apiBase, new UrlHttp());
+        DanmuApi.Auth auth = prefs.apiAuth();
+        if (auth.incomplete()) {
+            throw new DanmuApi.ApiException(0, "已选择官方 API 鉴权，但 AppId 或 AppSecret 没填");
+        }
+        return new DanmuApi(settings.apiBase, new UrlHttp(), auth);
     }
 
     /** 按片名/季/集自动匹配。 */
@@ -251,6 +255,9 @@ public final class DanmuRepository {
         Settings settings = prefs.settings();
         if (settings.apiBase == null || settings.apiBase.trim().isEmpty()) {
             throw new DanmuApi.ApiException(0, "还没有填写弹幕服务地址，先在面板「更多设置」里填");
+        }
+        if (prefs.apiAuth().incomplete()) {
+            throw new DanmuApi.ApiException(0, "已选择官方 API 鉴权，但 AppId 或 AppSecret 没填");
         }
     }
 
