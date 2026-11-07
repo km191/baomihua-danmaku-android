@@ -1,0 +1,43 @@
+<?xml version="1.0" encoding="utf-8"?>
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="108dp"
+    android:height="108dp"
+    android:viewportWidth="108"
+    android:viewportHeight="108">
+
+    <!-- 弹幕：三条飞过的字幕条 -->
+    <path
+        android:fillColor="#FF7A45"
+        android:pathData="M14,26 L58,26 A5,5 0 0 1 58,36 L14,36 A5,5 0 0 1 14,26 Z" />
+    <path
+        android:fillColor="#E8ECF3"
+        android:pathData="M24,42 L70,42 A5,5 0 0 1 70,52 L24,52 A5,5 0 0 1 24,42 Z" />
+    <path
+        android:fillColor="#4EA1FF"
+        android:pathData="M14,58 L52,58 A5,5 0 0 1 52,68 L14,68 A5,5 0 0 1 14,58 Z" />
+
+    <!-- 爆米花桶 -->
+    <path
+        android:fillColor="#F6EFE3"
+        android:pathData="M40,74 L74,74 L69,98 L45,98 Z" />
+    <path
+        android:fillColor="#FF7A45"
+        android:pathData="M43,74 L49,74 L47,98 L41,98 Z" />
+    <path
+        android:fillColor="#FF7A45"
+        android:pathData="M56,74 L62,74 L60,98 L54,98 Z" />
+    <path
+        android:fillColor="#FF7A45"
+        android:pathData="M68,74 L74,74 L71,98 L65,98 Z" />
+
+    <!-- 爆开的玉米花 -->
+    <path
+        android:fillColor="#FFF6DC"
+        android:pathData="M48,74 m-7,0 a7,7 0 1,0 14,0 a7,7 0 1,0 -14,0" />
+    <path
+        android:fillColor="#FFF6DC"
+        android:pathData="M60,72 m-8,0 a8,8 0 1,0 16,0 a8,8 0 1,0 -16,0" />
+    <path
+        android:fillColor="#FFF6DC"
+        android:pathData="M71,75 m-6,0 a6,6 0 1,0 12,0 a6,6 0 1,0 -12,0" />
+</vector>

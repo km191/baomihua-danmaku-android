@@ -1,0 +1,11 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="app_name">弹幕伴侣</string>
+    <string name="media_watcher_label">弹幕伴侣 · 媒体识别</string>
+    <string name="channel_service">弹幕悬浮窗</string>
+    <string name="notification_title">弹幕伴侣正在运行</string>
+    <string name="notification_text">弹幕会叠加在当前播放的app上</string>
+    <string name="action_stop">停止</string>
+    <string name="action_open">打开面板</string>
+    <string name="action_toggle">显示/隐藏弹幕</string>
+</resources>
