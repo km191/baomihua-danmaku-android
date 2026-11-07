@@ -23,7 +23,7 @@
 
 **[下载最新 APK](https://github.com/km191/baomihua-danmaku-android/releases/latest)**（121 KB，已签名，Android 6.0+）
 
-**当前版本：v1.35** · [更新记录](CHANGELOG.md) · [OPPO 适配说明](docs/OPPO-COLOROS.md) · [弹弹play API 接入](docs/DANDANPLAY-API.md)
+**当前版本：弹幕伴侣1.35** · [更新记录](CHANGELOG.md) · [OPPO 适配说明](docs/OPPO-COLOROS.md) · [弹弹play API 接入](docs/DANDANPLAY-API.md)
 
 ---
 
