@@ -27,10 +27,10 @@ $resCompiled = "$build\res.zip"
 $baseApk = "$build\base.apk"
 $unsigned = "$build\unsigned.apk"
 $aligned = "$build\aligned.apk"
-$outApk = "dist\DanmuCompanion-1.3.5.apk"
+$outApk = "dist\DanmuCompanion-1.35.apk"
 
-$versionName = "1.3.5"
-$versionCode = 11
+$versionName = "1.35"
+$versionCode = 12
 
 if (Test-Path $build) { Remove-Item $build -Recurse -Force }
 New-Item -ItemType Directory -Force -Path "$build\gen", "$build\classes", "$build\dex", "dist" | Out-Null

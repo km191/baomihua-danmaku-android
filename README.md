@@ -23,7 +23,7 @@
 
 **[下载最新 APK](https://github.com/km191/baomihua-danmaku-android/releases/latest)**（121 KB，已签名，Android 6.0+）
 
-**当前版本：1.3.5** · [更新记录](CHANGELOG.md) · [OPPO 适配说明](docs/OPPO-COLOROS.md) · [弹弹play API 接入](docs/DANDANPLAY-API.md)
+**当前版本：v1.35** · [更新记录](CHANGELOG.md) · [OPPO 适配说明](docs/OPPO-COLOROS.md) · [弹弹play API 接入](docs/DANDANPLAY-API.md)
 
 ---
 
@@ -44,7 +44,7 @@
 
 ## 最近更新
 
-- **1.3.5**：悬浮球右侧留 14dp，避免曲面屏/圆角裁切。
+- **v1.35**：悬浮球右侧留 14dp，避免曲面屏/圆角裁切。
 - **1.3.4**：弹幕真正贴顶；横屏后悬浮球重新按比例贴右。
 - **1.3.3**：弹幕行数 1–30 可调；悬浮球默认靠右。
 - **1.3.2**：主按钮改为隐藏/显示；通知栏点一下切换；「停止服务」才真正结束。
