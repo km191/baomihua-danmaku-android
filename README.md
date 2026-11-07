@@ -1,14 +1,20 @@
 # 弹幕伴侣 · 安卓版
 
-给**任意安卓播放器**叠加弹幕的悬浮窗工具：自动识别片名和集数，匹配弹幕源，跟随播放进度。
+给**任意安卓播放器**叠加弹幕的悬浮窗工具：**需要你先自配弹幕库/服务**，然后自动识别片名和集数、匹配弹幕、跟随播放进度。
 
 这是基于 [爆米花弹幕伴侣（Windows 版）](https://github.com/ghjkllasdf-fake/Baomihua-danmu-companion) 思路的安卓实现。
 桌面版给网易爆米花播放器叠一层弹幕窗口；安卓版做同一件事，只不过目标是**任意播放器**——
 因为手机上「正在播什么、播到第几秒」可以从系统媒体会话里读出来，不再需要探测播放器窗口。
 
-![在播放器上叠加弹幕](docs/screenshots/device-playback.jpg)
+> **使用前必须自配弹幕库。** 本应用只负责识别和渲染，不内置弹幕源，也不内置官方凭证。
+> 先自建 [danmu_api](https://github.com/huangxd-/danmu_api) 并把服务地址填进应用，或到
+> [弹弹play开发者中心](https://dev.dandanplay.com) 申请 AppId / AppSecret 接入官方 API。
+> 没有配置时悬浮窗能打开，但屏幕上不会出现弹幕。详见
+> [弹幕服务配置](#弹幕服务必须配)。
 
-*真机截图：弹幕叠在播放器画面上，屏幕右侧是悬浮球。*
+![真机：自配弹幕库在播放器上叠加弹幕](docs/screenshots/device-playback.jpg)
+
+*真机截图：弹幕来自自配的弹弹play v2 服务，叠在播放器画面上；右侧橙色「弹」字圆点是悬浮球。*
 
 [![Release](https://img.shields.io/github/v/release/km191/baomihua-danmaku-android?color=FF7A45)](https://github.com/km191/baomihua-danmaku-android/releases/latest)
 [![License](https://img.shields.io/badge/license-MIT-blue)](LICENSE)
