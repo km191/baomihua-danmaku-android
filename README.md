@@ -32,7 +32,7 @@
 
 ## 下载与安装
 
-1. 从 [Releases](https://github.com/km191/baomihua-danmaku-android/releases/latest) 下载 `弹幕伴侣v1.35.apk`。
+1. 从 [Releases](https://github.com/km191/baomihua-danmaku-android/releases/latest) 下载 `DanmuCompanion-1.35.apk`。
 2. 传到手机安装，允许「安装未知来源应用」。
 3. 使用本地自签名证书，系统可能提示未知开发者。
 
@@ -118,7 +118,7 @@ ColorOS 会限制后台应用。识别到 OPPO / 一加 / realme 时，应用会
 需要 Android SDK（build-tools 34、platform android-34）和 JDK 17+，无需 Gradle：
 
 ```powershell
-powershell -ExecutionPolicy Bypass -File scripts/build.ps1   # dist\弹幕伴侣v1.35.apk
+powershell -ExecutionPolicy Bypass -File scripts/build.ps1   # dist\DanmuCompanion-1.35.apk
 powershell -ExecutionPolicy Bypass -File scripts/test.ps1    # 190 项测试
 ```
 

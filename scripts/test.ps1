@@ -36,13 +36,13 @@ Write-Host "==> 渲染弹幕预览图" -ForegroundColor Cyan
     -cp "$core;$tests" PreviewRender "docs\preview-danmaku.png"
 if ($LASTEXITCODE -ne 0) { Write-Error "渲染预览失败"; exit 1 }
 
-if (Test-Path "dist\弹幕伴侣v1.35.apk") {
+if (Test-Path "dist\DanmuCompanion-1.35.apk") {
     Write-Host "==> 检查 APK 的 API 版本兼容性" -ForegroundColor Cyan
     New-Item -ItemType Directory -Force -Path "build\tools" | Out-Null
     & javac -encoding UTF-8 -d "build\tools" "tools\ApiLevelCheck.java"
     if ($LASTEXITCODE -eq 0 -and (Test-Path $apiXml)) {
         & java "-Dfile.encoding=UTF-8" "-Dstdout.encoding=UTF-8" -Xmx1g -cp "build\tools" `
-            ApiLevelCheck "dist\弹幕伴侣v1.35.apk" $apiXml 23
+            ApiLevelCheck "dist\DanmuCompanion-1.35.apk" $apiXml 23
     }
 }
 

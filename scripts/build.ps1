@@ -27,7 +27,7 @@ $resCompiled = "$build\res.zip"
 $baseApk = "$build\base.apk"
 $unsigned = "$build\unsigned.apk"
 $aligned = "$build\aligned.apk"
-$outApk = "dist\弹幕伴侣v1.35.apk"
+$outApk = "dist\DanmuCompanion-1.35.apk"
 
 $versionName = "1.35"
 $versionCode = 12
