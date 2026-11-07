@@ -11,7 +11,7 @@
 
 *真机截图：弹幕来自自配的弹弹play v2 服务，叠在播放器画面上；右侧橙色「弹」字圆点是悬浮球。*
 
-[▶ 视频介绍（55 秒，中文旁白）](https://github.com/km191/baomihua-danmaku-android/releases/download/v1.35/danmu-companion-v1.35-intro.mp4)
+[▶ 视频介绍（55 秒，中文旁白）](https://github.com/km191/baomihua-danmaku-android/releases/download/v1.35/danmu-companion-v1.35-intro.mp4) · [▶ 上手教程（70 秒，全流程）](https://github.com/km191/baomihua-danmaku-android/releases/download/v1.35/danmu-companion-v1.35-guide.mp4)
 
 [![Release](https://img.shields.io/github/v/release/km191/baomihua-danmaku-android?color=FF7A45)](https://github.com/km191/baomihua-danmaku-android/releases/latest)
 [![License](https://img.shields.io/badge/license-MIT-blue)](LICENSE)
