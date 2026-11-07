@@ -2,7 +2,7 @@
 
 给**任意安卓播放器**叠加弹幕的悬浮窗工具：自动识别片名和集数，匹配弹幕源，跟随播放进度。
 
-这是基于 [爆米花弹幕伴侣（Windows 版）](https://github.com/ghjkllasdf-fake/Baomihua-danmu-companion) 思路的安卓实现。
+这是基于开源项目 [爆米花弹幕伴侣（Windows 版）](https://github.com/ghjkllasdf-fake/Baomihua-danmu-companion) 思路的安卓实现。
 桌面版给网易爆米花播放器叠一层弹幕窗口；安卓版做同一件事，只不过目标是**任意播放器**——
 因为手机上「正在播什么、播到第几秒」可以从系统媒体会话里读出来，不再需要探测播放器窗口。
 
